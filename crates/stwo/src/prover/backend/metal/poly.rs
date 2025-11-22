@@ -57,14 +57,8 @@ impl PolyOps for MetalBackend {
         poly: &CircleCoefficients<Self>,
         point: CirclePoint<SecureField>,
     ) -> SecureField {
-        use crate::prover::backend::Column;
-        use crate::prover::backend::simd::column::BaseColumn;
-
-        // Convert Metal poly to SIMD
-        let cpu_coeffs = poly.coeffs.to_cpu();
-        let simd_coeffs: BaseColumn = cpu_coeffs.into_iter().collect();
-        let simd_poly = CircleCoefficients::new(simd_coeffs);
-        SimdBackend::eval_at_point(&simd_poly, point)
+        // Use GPU-accelerated evaluation for large polynomials
+        metal_eval_at_point_gpu(poly, point)
     }
 
     fn eval_at_point_by_folding(
@@ -1184,6 +1178,126 @@ fn metal_ifft_batched_dispatch(
         metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
         metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
     );
+}
+
+/// GPU-accelerated polynomial evaluation at a point using batched dispatch.
+///
+/// For small polynomials (log_size <= 8), falls back to CPU evaluation.
+/// For large polynomials, dispatches to GPU using the circle_eval_at_point kernel.
+///
+/// The kernel implements binary tree folding (Horner's method) where:
+///   eval(coeffs) = eval(left_half) + eval(right_half) * folding_factor
+///
+/// Folding factors are computed from the circle point: [y, x, pi(x), pi^2(x), ...]
+/// where pi(x) = 2*x^2 - 1 is the circle point doubling formula.
+fn metal_eval_at_point_gpu(
+    poly: &CircleCoefficients<MetalBackend>,
+    point: CirclePoint<SecureField>,
+) -> SecureField {
+    let log_size = poly.log_size();
+
+    // For small polynomials, fall back to CPU (more efficient than GPU dispatch overhead)
+    if log_size <= 8 {
+        use crate::prover::backend::Column;
+        use crate::prover::backend::simd::column::BaseColumn;
+
+        let cpu_coeffs = poly.coeffs.to_cpu();
+        let simd_coeffs: BaseColumn = cpu_coeffs.into_iter().collect();
+        let simd_poly = CircleCoefficients::new(simd_coeffs);
+        return SimdBackend::eval_at_point(&simd_poly, point);
+    }
+
+    let ctx = MetalContext::global();
+    let device = ctx.device();
+
+    // Coefficients are already in GPU memory (MetalBaseColumn)
+    let coeffs_buffer = poly.coeffs.buffer();
+
+    // Create buffers for kernel parameters
+    // For a single evaluation, we'll use batch size = 1
+    let num_evals = 1u32;
+
+    // Offset into coeffs (0 since we're evaluating a single polynomial)
+    let coeff_offset = 0u32;
+    let coeff_offset_buffer = device.new_buffer_with_data(
+        &coeff_offset as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Log size buffer
+    let log_size_buffer = device.new_buffer_with_data(
+        &log_size as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Evaluation point buffer (CirclePoint<SecureField>)
+    // SecureField is QM31: 4 x u32 (c0.a, c0.b, c1.a, c1.b)
+    // CirclePoint has x and y, so 8 x u32 total
+    let point_data: [u32; 8] = [
+        point.x.0 .0 .0,  // x.c0.a
+        point.x.0 .1 .0,  // x.c0.b
+        point.x.1 .0 .0,  // x.c1.a
+        point.x.1 .1 .0,  // x.c1.b
+        point.y.0 .0 .0,  // y.c0.a
+        point.y.0 .1 .0,  // y.c0.b
+        point.y.1 .0 .0,  // y.c1.a
+        point.y.1 .1 .0,  // y.c1.b
+    ];
+    let point_buffer = device.new_buffer_with_data(
+        point_data.as_ptr() as *const _,
+        (point_data.len() * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Result buffer (1 x QM31 = 4 x u32)
+    let result_buffer = device.new_buffer(
+        (4 * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Num evals buffer
+    let num_evals_buffer = device.new_buffer_with_data(
+        &num_evals as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Dispatch kernel
+    let command_buffer = ctx.command_queue().new_command_buffer();
+    let encoder = command_buffer.new_compute_command_encoder();
+
+    encoder.set_compute_pipeline_state(ctx.eval_at_point_pipeline());
+    encoder.set_buffer(0, Some(coeffs_buffer), 0);  // coeffs_base
+    encoder.set_buffer(1, Some(&coeff_offset_buffer), 0);  // coeff_offsets
+    encoder.set_buffer(2, Some(&log_size_buffer), 0);  // log_sizes
+    encoder.set_buffer(3, Some(&point_buffer), 0);  // points
+    encoder.set_buffer(4, Some(&result_buffer), 0);  // results
+    encoder.set_buffer(5, Some(&num_evals_buffer), 0);  // num_evals
+
+    // Dispatch 1 thread (1 evaluation)
+    let threadgroup_size = 1;
+    let threadgroups = 1;
+    encoder.dispatch_thread_groups(
+        metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
+        metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+    );
+
+    encoder.end_encoding();
+    command_buffer.commit();
+    command_buffer.wait_until_completed();
+
+    // Read result from GPU
+    let result_ptr = result_buffer.contents() as *const u32;
+    let result_data = unsafe { std::slice::from_raw_parts(result_ptr, 4) };
+
+    // Convert QM31 back to SecureField
+    use crate::core::fields::cm31::CM31;
+    use crate::core::fields::m31::M31;
+    let c0 = CM31::from_m31(M31::from(result_data[0]), M31::from(result_data[1]));
+    let c1 = CM31::from_m31(M31::from(result_data[2]), M31::from(result_data[3]));
+    SecureField::from_m31_array([c0.0, c0.1, c1.0, c1.1])
 }
 
 #[cfg(test)]

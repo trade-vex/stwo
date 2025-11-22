@@ -122,6 +122,9 @@ pub struct MetalContext {
     /// M31 accumulation kernel (dst += src elementwise).
     accumulate_m31_pipeline: ComputePipelineState,
 
+    /// Circle polynomial evaluation at point kernel.
+    eval_at_point_pipeline: ComputePipelineState,
+
     /// Cache for twiddle factor buffers.
     /// Key is a hash of the twiddle data, value is the Metal buffer.
     twiddle_cache: Mutex<HashMap<u64, Buffer>>,
@@ -193,6 +196,7 @@ impl MetalContext {
         let blake2s_channel_draw_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_draw")?;
         let blake2s_channel_mix_felts_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix_felts")?;
         let accumulate_m31_pipeline = Self::create_pipeline(&device, &library, "accumulate_m31")?;
+        let eval_at_point_pipeline = Self::create_pipeline(&device, &library, "circle_eval_at_point")?;
 
         let buffer_pools = GlobalPools::new(device.clone());
 
@@ -224,6 +228,7 @@ impl MetalContext {
             blake2s_channel_draw_pipeline,
             blake2s_channel_mix_felts_pipeline,
             accumulate_m31_pipeline,
+            eval_at_point_pipeline,
             twiddle_cache: Mutex::new(HashMap::new()),
             flat_twiddle_manager: FlatTwiddleManager::new(),
             buffer_pools,
@@ -389,6 +394,11 @@ impl MetalContext {
     /// Get M31 accumulation pipeline (dst += src elementwise).
     pub fn accumulate_m31_pipeline(&self) -> &ComputePipelineState {
         &self.accumulate_m31_pipeline
+    }
+
+    /// Get circle polynomial evaluation at point pipeline.
+    pub fn eval_at_point_pipeline(&self) -> &ComputePipelineState {
+        &self.eval_at_point_pipeline
     }
 
     /// Get or create a flattened twiddle buffer from multiple layers.
