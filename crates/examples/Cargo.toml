@@ -40,8 +40,4 @@ name = "poseidon"
 
 [[bench]]
 harness = false
-name = "fibonacci_metal_vs_simd"
-
-[[bench]]
-harness = false
 name = "fibonacci_e2e_proof"
