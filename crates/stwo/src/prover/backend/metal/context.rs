@@ -116,6 +116,9 @@ pub struct MetalContext {
     /// GPU Blake2s channel draw kernel (for GPU-resident Fiat-Shamir state).
     blake2s_channel_draw_pipeline: ComputePipelineState,
 
+    /// GPU Blake2s channel mix_felts kernel (for mixing SecureField arrays into channel).
+    blake2s_channel_mix_felts_pipeline: ComputePipelineState,
+
     /// M31 accumulation kernel (dst += src elementwise).
     accumulate_m31_pipeline: ComputePipelineState,
 
@@ -188,6 +191,7 @@ impl MetalContext {
         let fri_fold_circle_into_line_coords_pipeline = Self::create_pipeline(&device, &library, "fri_fold_circle_into_line_coords")?;
         let blake2s_channel_mix_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix")?;
         let blake2s_channel_draw_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_draw")?;
+        let blake2s_channel_mix_felts_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix_felts")?;
         let accumulate_m31_pipeline = Self::create_pipeline(&device, &library, "accumulate_m31")?;
 
         let buffer_pools = GlobalPools::new(device.clone());
@@ -218,6 +222,7 @@ impl MetalContext {
             fri_fold_circle_into_line_coords_pipeline,
             blake2s_channel_mix_pipeline,
             blake2s_channel_draw_pipeline,
+            blake2s_channel_mix_felts_pipeline,
             accumulate_m31_pipeline,
             twiddle_cache: Mutex::new(HashMap::new()),
             flat_twiddle_manager: FlatTwiddleManager::new(),
@@ -374,6 +379,11 @@ impl MetalContext {
     /// Get Blake2s channel draw pipeline (for GPU-resident Fiat-Shamir state).
     pub fn blake2s_channel_draw_pipeline(&self) -> &ComputePipelineState {
         &self.blake2s_channel_draw_pipeline
+    }
+
+    /// Get Blake2s channel mix_felts pipeline (for mixing SecureField arrays into channel).
+    pub fn blake2s_channel_mix_felts_pipeline(&self) -> &ComputePipelineState {
+        &self.blake2s_channel_mix_felts_pipeline
     }
 
     /// Get M31 accumulation pipeline (dst += src elementwise).

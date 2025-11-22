@@ -481,6 +481,106 @@ kernel void blake2s_channel_draw(
     }
 }
 
+/// GPU Blake2s channel mix_felts kernel
+/// Computes: new_digest = BLAKE2s(old_digest || felts_bytes)
+/// This is used to mix SecureField (QM31) elements into the Fiat-Shamir channel state
+///
+/// Each QM31 = 4 M31 values, each M31 = u32 (4 bytes) = 16 bytes per QM31
+/// We serialize QM31 elements to bytes in little-endian format and mix into digest
+///
+/// Single-thread execution: Channel operations are inherently serial
+/// For large arrays, we process in 64-byte chunks (limited by BLAKE2s block size)
+kernel void blake2s_channel_mix_felts(
+    device const uint32_t* old_digest [[buffer(0)]],  // 8 u32s (32 bytes)
+    device const uint32_t* felts [[buffer(1)]],        // QM31 elements (4 u32s each)
+    constant uint32_t& num_felts [[buffer(2)]],        // Number of QM31 elements
+    constant bool& is_m31_output [[buffer(3)]],
+    device uint32_t* new_digest [[buffer(4)]],         // Output: 8 u32s
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid != 0) return;  // Single thread only
+
+    // Initialize BLAKE2s state
+    uint32_t state[8];
+    blake2s_init(state);
+
+    // Total bytes to hash: 32 (old_digest) + num_felts * 16 (QM31 serialized)
+    uint32_t total_bytes = 32 + num_felts * 16;
+    uint32_t bytes_processed = 0;
+
+    // Message buffer for BLAKE2s compression (64 bytes = 16 u32s)
+    uint32_t message[16];
+
+    // First block: old_digest (32 bytes) + up to 32 bytes of felts
+    for (int i = 0; i < 8; i++) {
+        message[i] = old_digest[i];
+    }
+
+    // Add felts to first block (up to 8 u32s = 32 bytes)
+    uint32_t felts_in_first_block = (num_felts * 4 <= 8) ? num_felts * 4 : 8;
+    for (uint32_t i = 0; i < felts_in_first_block; i++) {
+        message[8 + i] = felts[i];
+    }
+
+    // If first block is complete (64 bytes), compress it
+    if (total_bytes >= 64) {
+        blake2s_compress(state, message, 64, 0, false);
+        bytes_processed = 64;
+
+        // Process remaining full 64-byte blocks
+        uint32_t felt_offset = 8;  // Already processed first 8 u32s of felts
+        while (bytes_processed + 64 <= total_bytes) {
+            // Copy 16 u32s (64 bytes) from felts to message
+            for (int i = 0; i < 16; i++) {
+                message[i] = felts[felt_offset + i];
+            }
+            blake2s_compress(state, message, 64, 0, false);
+            bytes_processed += 64;
+            felt_offset += 16;
+        }
+
+        // Process final partial block if any
+        uint32_t remaining_bytes = total_bytes - bytes_processed;
+        if (remaining_bytes > 0) {
+            // Copy remaining felts to message buffer
+            uint32_t remaining_u32s = (remaining_bytes + 3) / 4;  // Round up
+            for (uint32_t i = 0; i < remaining_u32s; i++) {
+                message[i] = felts[felt_offset + i];
+            }
+            // Zero padding for remaining message slots
+            for (uint32_t i = remaining_u32s; i < 16; i++) {
+                message[i] = 0;
+            }
+            blake2s_compress(state, message, remaining_bytes, 0, true);
+        } else {
+            // No remaining bytes, mark last compression as final
+            // Re-compress last block with final flag
+            felt_offset -= 16;
+            for (int i = 0; i < 16; i++) {
+                message[i] = felts[felt_offset + i];
+            }
+            blake2s_compress(state, message, 64, 0, true);
+        }
+    } else {
+        // Total message fits in one block (<= 64 bytes)
+        // Zero padding for remaining message slots
+        for (uint32_t i = 8 + felts_in_first_block; i < 16; i++) {
+            message[i] = 0;
+        }
+        blake2s_compress(state, message, total_bytes, 0, true);
+    }
+
+    // Reduce to M31 if required
+    if (is_m31_output) {
+        blake2s_reduce_m31(state);
+    }
+
+    // Write output
+    for (int i = 0; i < 8; i++) {
+        new_digest[i] = state[i];
+    }
+}
+
 /// IFFT normalization kernel: multiply all elements by 1/N.
 ///
 /// After inverse FFT, we need to normalize by dividing by domain size.
