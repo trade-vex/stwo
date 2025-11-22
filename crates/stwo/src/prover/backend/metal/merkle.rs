@@ -176,6 +176,7 @@ impl FromIterator<Blake2sHash> for MetalBlake2sColumn {
 }
 
 /// Build complete Merkle tree in a single GPU submission.
+#[allow(dead_code)]
 fn commit_tree_batched<H: Into<bool>>(
     ctx: &MetalContext,
     initial_layer: Vec<Blake2sHash>,
