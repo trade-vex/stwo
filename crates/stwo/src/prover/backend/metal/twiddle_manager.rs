@@ -151,6 +151,7 @@ impl FlatTwiddleManager {
     }
 
     /// Clear the cache to free memory.
+    #[allow(dead_code)]
     pub fn clear_cache(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
@@ -164,6 +165,7 @@ impl Default for FlatTwiddleManager {
 }
 
 /// Extension trait for passing twiddle sections to Metal compute encoders.
+#[allow(dead_code)]
 pub trait TwiddleEncoderExt {
     /// Set buffer with offset for a specific twiddle section.
     fn set_twiddle_section(

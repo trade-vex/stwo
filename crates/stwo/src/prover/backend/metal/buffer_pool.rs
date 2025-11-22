@@ -119,12 +119,14 @@ impl BufferPool {
     }
 
     /// Clear all buffers from the pool.
+    #[allow(dead_code)]
     pub fn clear(&self) {
         let mut available = self.available.lock().unwrap();
         available.clear();
     }
 
     /// Get pool statistics for monitoring.
+    #[allow(dead_code)]
     pub fn stats(&self) -> (u64, u64, u64) {
         let stats = self.stats.lock().unwrap();
         (stats.allocations, stats.reuses, stats.returns)
