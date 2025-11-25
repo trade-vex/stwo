@@ -61,11 +61,38 @@ impl PolyOps for MetalBackend {
         metal_eval_at_point_gpu(poly, point)
     }
 
+    fn eval_at_points_batched(
+        polys_and_points: &[(&CircleCoefficients<Self>, CirclePoint<SecureField>)],
+    ) -> Vec<SecureField> {
+        let _timer = crate::metal_profile_fn!("eval_at_points_batched", "GPU", num_evals = polys_and_points.len());
+
+        if polys_and_points.is_empty() {
+            return Vec::new();
+        }
+
+        // For very small batches or small polynomials, fall back to CPU
+        let max_log_size = polys_and_points.iter()
+            .map(|(poly, _)| poly.log_size())
+            .max()
+            .unwrap_or(0);
+
+        if polys_and_points.len() < 4 || max_log_size <= 8 {
+            // Fall back to default implementation (CPU)
+            return polys_and_points
+                .iter()
+                .map(|(poly, point)| Self::eval_at_point(poly, *point))
+                .collect();
+        }
+
+        metal_eval_at_points_batched_gpu(polys_and_points)
+    }
+
     fn eval_at_point_by_folding(
         evals: &CircleEvaluation<Self, BaseField, BitReversedOrder>,
         point: CirclePoint<SecureField>,
         twiddles: &TwiddleTree<Self>,
     ) -> SecureField {
+        let _timer = crate::metal_profile_fn!("eval_at_point_by_folding", "CPU", log_size = evals.domain.log_size());
         use crate::prover::backend::Column;
         use crate::prover::backend::simd::column::BaseColumn;
 
@@ -85,6 +112,7 @@ impl PolyOps for MetalBackend {
         poly: &CircleCoefficients<Self>,
         log_size: u32,
     ) -> CircleCoefficients<Self> {
+        let _timer = crate::metal_profile_fn!("extend", "CPU", from_log_size = poly.log_size(), to_log_size = log_size);
         use crate::prover::backend::Column;
         use crate::prover::backend::simd::column::BaseColumn;
 
@@ -255,6 +283,7 @@ impl PolyOps for MetalBackend {
         twiddles: &TwiddleTree<Self>,
     ) -> Vec<CircleCoefficients<Self>> {
         let columns: Vec<_> = columns.into_iter().collect();
+        let _timer = crate::metal_profile_fn!("interpolate_columns", "GPU", num_columns = columns.len());
 
         // Fall back to serial for small batches
         if columns.is_empty() || columns.iter().all(|eval| eval.domain.log_size() < MIN_FFT_LOG_SIZE) {
@@ -1195,6 +1224,7 @@ fn metal_eval_at_point_gpu(
     point: CirclePoint<SecureField>,
 ) -> SecureField {
     let log_size = poly.log_size();
+    let _timer = crate::metal_profile_fn!("eval_at_point", "GPU/CPU", log_size = log_size);
 
     // For small polynomials, fall back to CPU (more efficient than GPU dispatch overhead)
     if log_size <= 8 {
@@ -1298,6 +1328,142 @@ fn metal_eval_at_point_gpu(
     let c0 = CM31::from_m31(M31::from(result_data[0]), M31::from(result_data[1]));
     let c1 = CM31::from_m31(M31::from(result_data[2]), M31::from(result_data[3]));
     SecureField::from_m31_array([c0.0, c0.1, c1.0, c1.1])
+}
+
+/// GPU-accelerated batched polynomial evaluation at multiple points.
+///
+/// This function evaluates multiple polynomials at different points in a single GPU dispatch,
+/// significantly reducing dispatch overhead compared to calling eval_at_point individually.
+///
+/// The implementation:
+/// 1. Consolidates all coefficient data into a single GPU buffer (or uses existing Metal buffers)
+/// 2. Creates offset, log_size, and point arrays for the kernel
+/// 3. Dispatches a single GPU kernel with one thread per evaluation
+/// 4. Reads back all results at once
+fn metal_eval_at_points_batched_gpu(
+    polys_and_points: &[(&CircleCoefficients<MetalBackend>, CirclePoint<SecureField>)],
+) -> Vec<SecureField> {
+    let num_evals = polys_and_points.len() as u32;
+    if num_evals == 0 {
+        return Vec::new();
+    }
+
+    let ctx = MetalContext::global();
+    let device = ctx.device();
+
+    // Build coefficient buffer, offsets, and log_sizes
+    let mut coeff_offsets = Vec::with_capacity(num_evals as usize);
+    let mut log_sizes = Vec::with_capacity(num_evals as usize);
+    let mut all_coeffs = Vec::new();
+    let mut current_offset = 0u32;
+
+    for (poly, _) in polys_and_points {
+        let cpu_coeffs = poly.coeffs.to_cpu();
+        coeff_offsets.push(current_offset);
+        log_sizes.push(poly.log_size());
+        all_coeffs.extend(cpu_coeffs.iter().map(|f| f.0));
+        current_offset += 1u32 << poly.log_size();
+    }
+
+    // Create GPU buffers
+    let coeffs_buffer = device.new_buffer_with_data(
+        all_coeffs.as_ptr() as *const _,
+        (all_coeffs.len() * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    let offsets_buffer = device.new_buffer_with_data(
+        coeff_offsets.as_ptr() as *const _,
+        (coeff_offsets.len() * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    let log_sizes_buffer = device.new_buffer_with_data(
+        log_sizes.as_ptr() as *const _,
+        (log_sizes.len() * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Build points array (each point is 8 x u32: x and y, each is QM31 = 4 x u32)
+    let mut points_data = Vec::with_capacity(num_evals as usize * 8);
+    for (_, point) in polys_and_points {
+        points_data.extend_from_slice(&[
+            point.x.0 .0 .0,  // x.c0.a
+            point.x.0 .1 .0,  // x.c0.b
+            point.x.1 .0 .0,  // x.c1.a
+            point.x.1 .1 .0,  // x.c1.b
+            point.y.0 .0 .0,  // y.c0.a
+            point.y.0 .1 .0,  // y.c0.b
+            point.y.1 .0 .0,  // y.c1.a
+            point.y.1 .1 .0,  // y.c1.b
+        ]);
+    }
+
+    let points_buffer = device.new_buffer_with_data(
+        points_data.as_ptr() as *const _,
+        (points_data.len() * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Result buffer (num_evals x QM31 = num_evals x 4 x u32)
+    let result_buffer = device.new_buffer(
+        (num_evals as usize * 4 * std::mem::size_of::<u32>()) as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    let num_evals_buffer = device.new_buffer_with_data(
+        &num_evals as *const u32 as *const _,
+        std::mem::size_of::<u32>() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    // Dispatch kernel
+    let command_buffer = ctx.command_queue().new_command_buffer();
+    let encoder = command_buffer.new_compute_command_encoder();
+
+    encoder.set_compute_pipeline_state(ctx.eval_at_point_pipeline());
+    encoder.set_buffer(0, Some(&coeffs_buffer), 0);      // coeffs_base
+    encoder.set_buffer(1, Some(&offsets_buffer), 0);     // coeff_offsets
+    encoder.set_buffer(2, Some(&log_sizes_buffer), 0);   // log_sizes
+    encoder.set_buffer(3, Some(&points_buffer), 0);      // points
+    encoder.set_buffer(4, Some(&result_buffer), 0);      // results
+    encoder.set_buffer(5, Some(&num_evals_buffer), 0);   // num_evals
+
+    // Dispatch one thread per evaluation
+    let threadgroup_size = 256.min(num_evals as u64).max(1);
+    let threadgroups = ((num_evals as u64 + threadgroup_size - 1) / threadgroup_size).max(1);
+
+    encoder.dispatch_thread_groups(
+        metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
+        metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+    );
+
+    encoder.end_encoding();
+    command_buffer.commit();
+    command_buffer.wait_until_completed();
+
+    // Read results
+    let result_ptr = result_buffer.contents() as *const u32;
+    let result_data = unsafe { std::slice::from_raw_parts(result_ptr, num_evals as usize * 4) };
+
+    // Convert results to SecureField
+    use crate::core::fields::cm31::CM31;
+    use crate::core::fields::m31::M31;
+
+    (0..num_evals as usize)
+        .map(|i| {
+            let offset = i * 4;
+            let c0 = CM31::from_m31(
+                M31::from(result_data[offset]),
+                M31::from(result_data[offset + 1]),
+            );
+            let c1 = CM31::from_m31(
+                M31::from(result_data[offset + 2]),
+                M31::from(result_data[offset + 3]),
+            );
+            SecureField::from_m31_array([c0.0, c0.1, c1.0, c1.1])
+        })
+        .collect()
 }
 
 #[cfg(test)]

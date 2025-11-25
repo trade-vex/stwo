@@ -221,6 +221,7 @@ impl FriOps for MetalBackend {
         eval: &SecureEvaluation<Self, BitReversedOrder>,
     ) -> (SecureEvaluation<Self, BitReversedOrder>, SecureField) {
         let domain_size = eval.len();
+        let _timer = crate::metal_profile_fn!("fri_decompose", "GPU", domain_size = domain_size);
         let half_size = domain_size / 2;
 
         let lambda = {

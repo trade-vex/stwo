@@ -106,18 +106,71 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             class = "EvaluateOutOfDomain"
         )
         .entered();
+
+        let _eval_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+
+        // Collect all (poly, point) pairs where coefficients are available for batched evaluation
+        let polynomials = self.polynomials();
+        let poly_cols_ref = polynomials.as_cols_ref();
+        let mut all_pairs_with_coeffs = Vec::new();
+        let mut all_pairs_without_coeffs = Vec::new();
+
+        for (poly_cols, point_cols) in poly_cols_ref
+            .iter()
+            .zip(sampled_points.as_cols_ref().iter())
+        {
+            for (poly, points) in poly_cols.iter().zip(point_cols.iter()) {
+                for &point in points.iter() {
+                    if let Some(coeffs) = &poly.coeffs {
+                        all_pairs_with_coeffs.push((coeffs, point));
+                    } else {
+                        all_pairs_without_coeffs.push((poly, point));
+                    }
+                }
+            }
+        }
+
+        // Evaluate polynomials with coefficients using batched backend method
+        let mut batched_values = if !all_pairs_with_coeffs.is_empty() {
+            B::eval_at_points_batched(&all_pairs_with_coeffs)
+        } else {
+            Vec::new()
+        };
+
+        // Evaluate polynomials without coefficients using folding
+        let mut folding_values: Vec<SecureField> = all_pairs_without_coeffs
+            .iter()
+            .map(|(poly, point)| poly.evals.eval_at_point_by_folding(*point, self.twiddles))
+            .collect();
+
+        // Reconstruct TreeVec structure from flat results
+        let mut batched_iter = batched_values.drain(..);
+        let mut folding_iter = folding_values.drain(..);
+
         let samples = self
             .polynomials()
             .zip_cols(&sampled_points)
             .map_cols(|(poly, points)| {
                 points
                     .iter()
-                    .map(|&point| PointSample {
-                        point,
-                        value: poly.eval_at_point(point, self.twiddles),
+                    .map(|&point| {
+                        let value = if poly.coeffs.is_some() {
+                            batched_iter.next().expect("batched results mismatch")
+                        } else {
+                            folding_iter.next().expect("folding results mismatch")
+                        };
+                        PointSample { point, value }
                     })
                     .collect_vec()
             });
+
+        if let Some(start) = _eval_start {
+            eprintln!("[PROFILE] eval_at_point_loop | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
         span.exit();
         let sampled_values = samples
             .as_cols_ref()
@@ -125,6 +178,11 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
         channel.mix_felts(&sampled_values.clone().flatten_cols());
 
         // Compute oods quotients for boundary constraints on the sampled points.
+        let _quot_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let columns = self.evaluations().flatten();
         let quotients = compute_fri_quotients(
             &columns,
@@ -132,23 +190,50 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             channel.draw_secure_felt(),
             self.config.fri_config.log_blowup_factor,
         );
+        if let Some(start) = _quot_start {
+            eprintln!("[PROFILE] compute_fri_quotients | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Run FRI commitment phase on the oods quotients.
+        let _fri_commit_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let fri_prover =
             FriProver::<B, MC>::commit(channel, self.config.fri_config, &quotients, self.twiddles);
+        if let Some(start) = _fri_commit_start {
+            eprintln!("[PROFILE] fri_commit | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Proof of work.
         let span1 = span!(Level::INFO, "Grind", class = "Queries POW").entered();
+        let _grind_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let proof_of_work = B::grind(channel, self.config.pow_bits);
+        if let Some(start) = _grind_start {
+            eprintln!("[PROFILE] grind_pow | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
         span1.exit();
         channel.mix_u64(proof_of_work);
 
         // FRI decommitment phase.
+        let _fri_decommit_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let FriDecommitResult {
             fri_proof,
             query_positions_by_log_size,
             unsorted_query_locations,
         } = fri_prover.decommit(channel);
+        if let Some(start) = _fri_decommit_start {
+            eprintln!("[PROFILE] fri_decommit | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Decommit the FRI queries on the merkle trees.
         let decommitment_results = self

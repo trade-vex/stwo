@@ -194,10 +194,19 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             Vec<Cow<'_, CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>>>,
         > = if need_to_extend {
             let _span = span!(Level::INFO, "Constraint Extension").entered();
+            let _ext_start = if std::env::var("METAL_PROFILE").is_ok() {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
             let twiddles = MetalBackend::precompute_twiddles(eval_domain.half_coset);
-            component_polys
+            let result = component_polys
                 .as_cols_ref()
-                .map_cols(|col| Cow::Owned(col.get_evaluation_on_domain(eval_domain, &twiddles)))
+                .map_cols(|col| Cow::Owned(col.get_evaluation_on_domain(eval_domain, &twiddles)));
+            if let Some(start) = _ext_start {
+                eprintln!("[PROFILE] constraint_extension (FFT) | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            }
+            result
         } else {
             component_polys.map_cols(|c| Cow::Borrowed(&c.evals))
         };
@@ -250,6 +259,11 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
         }
 
         // Convert Metal trace to SIMD for vectorized evaluation
+        let _convert_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let cpu_col = accum.col.to_cpu();
         let mut simd_col = SecureColumnByCoords::<SimdBackend>::from_cpu(cpu_col);
         let simd_trace = trace.as_cols_ref().map_cols(|c| {
@@ -259,8 +273,16 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
                 cpu_vals.into_iter().collect()
             )
         });
+        if let Some(start) = _convert_start {
+            eprintln!("[PROFILE] metal_to_simd_conversion | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Use vectorized SIMD path (processes 64 elements at once)
+        let _eval_start = if std::env::var("METAL_PROFILE").is_ok() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let col = unsafe { VeryPackedSecureColumnByCoords::transform_under_mut(&mut simd_col) };
         let range = 0..(1 << (eval_domain.log_size() - LOG_N_LANES - LOG_N_VERY_PACKED_ELEMS));
 
@@ -303,6 +325,9 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
                 }
             }
         });
+        if let Some(start) = _eval_start {
+            eprintln!("[PROFILE] constraint_eval_simd_loop | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
 
         // Convert SIMD result back to Metal
         let result_cpu = simd_col.to_cpu();
