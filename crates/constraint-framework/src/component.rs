@@ -152,16 +152,25 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
                 }
             })
             .collect();
+
+        #[cfg(not(feature = "metal_prover"))]
+        let component = Self {
+            eval,
+            trace_locations,
+            info,
+            preprocessed_column_indices,
+            claimed_sum
+        };
+
+        #[cfg(all(target_os = "macos", feature = "metal_prover"))]
         let mut component = Self {
             eval,
             trace_locations,
             info,
             preprocessed_column_indices,
             claimed_sum,
-            #[cfg(all(target_os = "macos", feature = "metal_prover"))]
             bytecode: None,
         };
-
         #[cfg(all(target_os = "macos", feature = "metal_prover"))]
         component.generate_bytecode();
 
