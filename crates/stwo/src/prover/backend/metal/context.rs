@@ -125,6 +125,15 @@ pub struct MetalContext {
     /// Circle polynomial evaluation at point kernel.
     eval_at_point_pipeline: ComputePipelineState,
 
+    /// GPU constraint evaluation VM kernel.
+    constraint_eval_vm_pipeline: ComputePipelineState,
+
+    /// GPU trace reshape (row-major to column-major) kernel.
+    trace_reshape_column_pipeline: ComputePipelineState,
+
+    /// GPU trace reshape batch kernel (multiple columns).
+    trace_reshape_batch_pipeline: ComputePipelineState,
+
     /// Cache for twiddle factor buffers.
     /// Key is a hash of the twiddle data, value is the Metal buffer.
     twiddle_cache: Mutex<HashMap<u64, Buffer>>,
@@ -197,6 +206,9 @@ impl MetalContext {
         let blake2s_channel_mix_felts_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix_felts")?;
         let accumulate_m31_pipeline = Self::create_pipeline(&device, &library, "accumulate_m31")?;
         let eval_at_point_pipeline = Self::create_pipeline(&device, &library, "circle_eval_at_point")?;
+        let constraint_eval_vm_pipeline = Self::create_pipeline(&device, &library, "constraint_eval_vm")?;
+        let trace_reshape_column_pipeline = Self::create_pipeline(&device, &library, "trace_reshape_column")?;
+        let trace_reshape_batch_pipeline = Self::create_pipeline(&device, &library, "trace_reshape_batch")?;
 
         let buffer_pools = GlobalPools::new(device.clone());
 
@@ -229,6 +241,9 @@ impl MetalContext {
             blake2s_channel_mix_felts_pipeline,
             accumulate_m31_pipeline,
             eval_at_point_pipeline,
+            constraint_eval_vm_pipeline,
+            trace_reshape_column_pipeline,
+            trace_reshape_batch_pipeline,
             twiddle_cache: Mutex::new(HashMap::new()),
             flat_twiddle_manager: FlatTwiddleManager::new(),
             buffer_pools,
@@ -399,6 +414,21 @@ impl MetalContext {
     /// Get circle polynomial evaluation at point pipeline.
     pub fn eval_at_point_pipeline(&self) -> &ComputePipelineState {
         &self.eval_at_point_pipeline
+    }
+
+    /// Get GPU constraint evaluation VM pipeline.
+    pub fn constraint_eval_vm_pipeline(&self) -> &ComputePipelineState {
+        &self.constraint_eval_vm_pipeline
+    }
+
+    /// Get GPU trace reshape (row-major to column-major) pipeline.
+    pub fn trace_reshape_column_pipeline(&self) -> &ComputePipelineState {
+        &self.trace_reshape_column_pipeline
+    }
+
+    /// Get GPU trace reshape batch pipeline (multiple columns).
+    pub fn trace_reshape_batch_pipeline(&self) -> &ComputePipelineState {
+        &self.trace_reshape_batch_pipeline
     }
 
     /// Get or create a flattened twiddle buffer from multiple layers.

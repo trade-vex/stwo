@@ -56,6 +56,8 @@ mod buffer_pool;
 mod channel;
 #[cfg(target_os = "macos")]
 pub mod profiling;
+#[cfg(target_os = "macos")]
+pub mod constraint_eval_gpu;
 
 // Export Metal context (actively used)
 #[cfg(target_os = "macos")]

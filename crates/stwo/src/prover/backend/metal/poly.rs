@@ -22,9 +22,6 @@ use super::context::MetalContext;
 use super::thresholds::MIN_FFT_LOG_SIZE;
 use super::{MetalBackend, MetalBaseColumn};
 
-/// Generates circle twiddles (layer 0) from first line twiddles (layer 1).
-/// For each pair [x, y] in first_line_twiddles, generates [y, -y, -x, x].
-/// Note: Twiddles are doubled (2*value) for SIMD optimization.
 fn circle_twiddles_from_line_twiddles(first_line_twiddles: &[u32]) -> Vec<u32> {
     const P_DBL: u32 = 4294967294;  // 2 * (2^31 - 1) = 2^32 - 2
     let neg_m31_dbl = |a_dbl: u32| if a_dbl == 0 { 0 } else { P_DBL - a_dbl };
@@ -275,9 +272,6 @@ impl PolyOps for MetalBackend {
         )
     }
 
-    /// Batched IFFT for multiple columns to reduce GPU dispatch overhead.
-    /// This is critical for performance - interpolating 208 columns individually
-    /// wastes ~76ms on synchronous GPU dispatches (76% of proof time at log_n=14).
     fn interpolate_columns(
         columns: impl IntoIterator<Item = CircleEvaluation<Self, BaseField, BitReversedOrder>>,
         twiddles: &TwiddleTree<Self>,
@@ -352,17 +346,6 @@ impl PolyOps for MetalBackend {
     }
 }
 
-// ============================================================================
-// Metal GPU Dispatch Functions
-// ============================================================================
-
-/// Dispatch forward FFT to Metal GPU (radix-8 implementation).
-///
-/// This function processes FFT layers using GPU acceleration for eligible transforms.
-/// For Phase 1, we only use GPU if all layers can be processed (log_size divisible by 3).
-/// Otherwise, we fall back to full SIMD implementation.
-///
-/// TODO(Phase 2): Implement mixed GPU+SIMD execution for partial layer processing.
 fn metal_fft_dispatch(
     poly: &CircleCoefficients<MetalBackend>,
     domain: CircleDomain,
@@ -472,9 +455,6 @@ fn metal_fft_dispatch(
     CircleEvaluation::new(domain, result_col)
 }
 
-/// Process FFT using an existing encoder (for batching multiple FFTs).
-/// This function adds FFT operations to the encoder but does NOT submit the command buffer.
-/// Returns the output buffer which will contain results after command buffer execution.
 fn metal_fft_batched_prepare(
     ctx: &MetalContext,
     device: &metal::DeviceRef,
@@ -542,9 +522,6 @@ fn metal_fft_batched_prepare(
     output_buffer
 }
 
-/// Run FFT on a single domain with batched encoding (helper for subdomain evaluation).
-/// Processes data in-place at the given offset within the buffer.
-/// Uses the provided encoder instead of creating command buffers.
 fn metal_fft_single_domain_batched(
     ctx: &MetalContext,
     encoder: &metal::ComputeCommandEncoderRef,
@@ -816,12 +793,6 @@ fn metal_fft_single_domain_batched(
     }
 }
 
-/// Dispatch inverse FFT to Metal GPU (radix-8 implementation).
-///
-/// Similar to forward FFT but processes layers in reverse order for IFFT.
-/// For Phase 1, we only use GPU if all layers can be processed (log_size divisible by 3).
-///
-/// TODO(Phase 2): Implement mixed GPU+SIMD execution for partial layer processing.
 fn metal_ifft_dispatch(
     eval: CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>,
     twiddles: &TwiddleTree<MetalBackend>,
@@ -1069,8 +1040,6 @@ fn metal_ifft_dispatch(
     CircleCoefficients::new(result_col)
 }
 
-/// Batched IFFT dispatch - adds IFFT operations to an existing encoder without committing.
-/// This allows multiple IFFTs to be batched into a single command buffer submission.
 fn metal_ifft_batched_dispatch(
     ctx: &MetalContext,
     encoder: &metal::ComputeCommandEncoderRef,

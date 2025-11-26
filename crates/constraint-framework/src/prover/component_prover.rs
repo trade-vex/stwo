@@ -171,6 +171,9 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
         trace: &Trace<'_, MetalBackend>,
         evaluation_accumulator: &mut DomainEvaluationAccumulator<MetalBackend>,
     ) {
+        if std::env::var("METAL_DEBUG").is_ok() {
+            eprintln!("[METAL] MetalBackend ComponentProver called!");
+        }
         if self.n_constraints() == 0 {
             return;
         }
@@ -185,7 +188,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             .map(|idx| &trace.polys[PREPROCESSED_TRACE_IDX][*idx])
             .collect();
 
-        // Extend trace if necessary using Metal FFT
         let need_to_extend = component_polys
             .iter()
             .flatten()
@@ -218,7 +220,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             .collect_vec();
         bit_reverse(&mut denom_inv);
 
-        // Accumulator
         let [mut accum] =
             evaluation_accumulator.columns([(eval_domain.log_size(), self.n_constraints())]);
         accum.random_coeff_powers.reverse();
@@ -230,11 +231,38 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
         )
         .entered();
 
-        // MetalBackend uses SIMD for constraint evaluation (same as SimdBackend)
-        // Metal handles FFT above, SIMD handles vectorized constraint evaluation
+        const MIN_GPU_CONSTRAINT_LOG_SIZE: u32 = 12;
+
+        if trace_domain.log_size() >= MIN_GPU_CONSTRAINT_LOG_SIZE {
+            if let Some(bytecode) = self.bytecode() {
+                use stwo::prover::backend::metal::constraint_eval_gpu;
+
+                let _gpu_start = if std::env::var("METAL_PROFILE").is_ok() {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
+
+                let trace_refs = trace.as_cols_ref().map_cols(|c| c.as_ref());
+                let gpu_result = constraint_eval_gpu::evaluate_constraints_gpu(
+                    bytecode,
+                    &trace_refs,
+                    &accum.random_coeff_powers,
+                    &CanonicCoset::new(trace_domain.log_size()),
+                    eval_domain.log_size(),
+                );
+
+                *accum.col = gpu_result.output;
+
+                if let Some(start) = _gpu_start {
+                    eprintln!("[PROFILE] constraint_eval_gpu | log_size={}, time={:.3}ms",
+                             trace_domain.log_size(), start.elapsed().as_secs_f64() * 1000.0);
+                }
+                return;
+            }
+        }
 
         if trace_domain.log_size() < LOG_N_LANES + LOG_N_VERY_PACKED_ELEMS {
-            // Fall back to CPU if the trace is too small
             let mut col = accum.col.to_cpu();
             let trace_cols = trace.as_cols_ref().map_cols(|c| c.to_cpu());
 
@@ -258,7 +286,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             return;
         }
 
-        // Convert Metal trace to SIMD for vectorized evaluation
         let _convert_start = if std::env::var("METAL_PROFILE").is_ok() {
             Some(std::time::Instant::now())
         } else {
@@ -277,7 +304,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             eprintln!("[PROFILE] metal_to_simd_conversion | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
         }
 
-        // Use vectorized SIMD path (processes 64 elements at once)
         let _eval_start = if std::env::var("METAL_PROFILE").is_ok() {
             Some(std::time::Instant::now())
         } else {
@@ -329,7 +355,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             eprintln!("[PROFILE] constraint_eval_simd_loop | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
         }
 
-        // Convert SIMD result back to Metal
         let result_cpu = simd_col.to_cpu();
         *accum.col = SecureColumnByCoords::<MetalBackend>::from_cpu(result_cpu);
     }

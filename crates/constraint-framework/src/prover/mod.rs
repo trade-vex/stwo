@@ -4,6 +4,10 @@ mod cpu_domain;
 mod logup;
 pub mod relation_tracker;
 mod simd_domain;
+pub mod bytecode;
+pub mod bytecode_generator;
+#[cfg(test)]
+mod test_gpu_constraint;
 
 pub use assert::{assert_constraints_on_polys, assert_constraints_on_trace, AssertEvaluator};
 pub use cpu_domain::CpuDomainEvaluator;

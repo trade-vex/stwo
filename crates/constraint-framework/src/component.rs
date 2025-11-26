@@ -116,6 +116,8 @@ pub struct FrameworkComponent<C: FrameworkEval> {
     pub(super) preprocessed_column_indices: Vec<usize>,
     pub(super) claimed_sum: SecureField,
     info: InfoEvaluator,
+    #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+    pub(super) bytecode: Option<Vec<u8>>,
 }
 
 impl<E: FrameworkEval> FrameworkComponent<E> {
@@ -150,13 +152,20 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
                 }
             })
             .collect();
-        Self {
+        let mut component = Self {
             eval,
             trace_locations,
             info,
             preprocessed_column_indices,
             claimed_sum,
-        }
+            #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+            bytecode: None,
+        };
+
+        #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+        component.generate_bytecode();
+
+        component
     }
 
     pub fn trace_locations(&self) -> &[TreeSubspan] {
@@ -180,6 +189,27 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
                 .map(|(k, v)| (k.clone(), v * size))
                 .collect(),
         )
+    }
+
+    #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+    pub fn generate_bytecode(&mut self) {
+        use crate::prover::bytecode_generator::BytecodeGenerator;
+
+        let n_interactions = self.info.mask_offsets.len();
+        let mut generator = BytecodeGenerator::new(
+            n_interactions,
+            self.eval.log_size(),
+            self.claimed_sum,
+        );
+
+        generator = self.eval.evaluate(generator);
+        generator.compile();
+        self.bytecode = Some(generator.program.bytes);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+    pub fn bytecode(&self) -> Option<&[u8]> {
+        self.bytecode.as_deref()
     }
 }
 
