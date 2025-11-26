@@ -92,10 +92,14 @@ pub unsafe fn fft_lower_with_vecwise(
 
     #[cfg(test)]
     if log_size == 9 {
-        println!("\n[SIMD fft_lower_with_vecwise] log_size={}, fft_layers={}, VECWISE_FFT_BITS={}",
-                 log_size, fft_layers, VECWISE_FFT_BITS);
-        println!("[SIMD] Will process non-vecwise layers: {}..{} (step_by 3, rev)",
-                 VECWISE_FFT_BITS, fft_layers);
+        println!(
+            "\n[SIMD fft_lower_with_vecwise] log_size={}, fft_layers={}, VECWISE_FFT_BITS={}",
+            log_size, fft_layers, VECWISE_FFT_BITS
+        );
+        println!(
+            "[SIMD] Will process non-vecwise layers: {}..{} (step_by 3, rev)",
+            VECWISE_FFT_BITS, fft_layers
+        );
     }
 
     let src = UnsafeConst(src);
@@ -106,7 +110,11 @@ pub unsafe fn fft_lower_with_vecwise(
         for layer in (VECWISE_FFT_BITS..fft_layers).step_by(3).rev() {
             #[cfg(test)]
             if log_size == 9 && index_h == 0 {
-                println!("[SIMD] Processing non-vecwise layer={}, remaining={}", layer, fft_layers - layer);
+                println!(
+                    "[SIMD] Processing non-vecwise layer={}, remaining={}",
+                    layer,
+                    fft_layers - layer
+                );
             }
             match fft_layers - layer {
                 1 => {
@@ -224,7 +232,11 @@ unsafe fn fft_vecwise_loop(
 ) {
     #[cfg(test)]
     if index_h == 0 && loop_bits == 4 {
-        println!("[SIMD fft_vecwise_loop] loop_bits={}, twiddle_dbl.len()={}", loop_bits, twiddle_dbl.len());
+        println!(
+            "[SIMD fft_vecwise_loop] loop_bits={}, twiddle_dbl.len()={}",
+            loop_bits,
+            twiddle_dbl.len()
+        );
         println!("[SIMD] Uses twiddle_dbl[3] for layer 3 (circle), then twiddle_dbl[0,1,2] for layers 0-2");
     }
 
@@ -274,13 +286,32 @@ unsafe fn fft3_loop(
 ) {
     #[cfg(test)]
     if layer == 5 && index_h == 0 {
-        println!("\n[SIMD fft3_loop] layer={}, twiddle_lens=[{}, {}, {}]",
-                 layer, twiddle_dbl[0].len(), twiddle_dbl[1].len(), twiddle_dbl[2].len());
-        println!("[SIMD] tw0[0..4]: {:?}", &twiddle_dbl[0][..4.min(twiddle_dbl[0].len())]);
-        println!("[SIMD] tw1[0..4]: {:?}", &twiddle_dbl[1][..4.min(twiddle_dbl[1].len())]);
-        println!("[SIMD] tw2[0..2]: {:?}", &twiddle_dbl[2][..2.min(twiddle_dbl[2].len())]);
-        println!("[SIMD] Input before fft3 (first 16 from src): {:?}",
-                 std::slice::from_raw_parts(src, 16).iter().map(|&x| x).collect::<Vec<_>>());
+        println!(
+            "\n[SIMD fft3_loop] layer={}, twiddle_lens=[{}, {}, {}]",
+            layer,
+            twiddle_dbl[0].len(),
+            twiddle_dbl[1].len(),
+            twiddle_dbl[2].len()
+        );
+        println!(
+            "[SIMD] tw0[0..4]: {:?}",
+            &twiddle_dbl[0][..4.min(twiddle_dbl[0].len())]
+        );
+        println!(
+            "[SIMD] tw1[0..4]: {:?}",
+            &twiddle_dbl[1][..4.min(twiddle_dbl[1].len())]
+        );
+        println!(
+            "[SIMD] tw2[0..2]: {:?}",
+            &twiddle_dbl[2][..2.min(twiddle_dbl[2].len())]
+        );
+        println!(
+            "[SIMD] Input before fft3 (first 16 from src): {:?}",
+            std::slice::from_raw_parts(src, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
     }
 
     for index_l in 0..1 << loop_bits {
@@ -307,8 +338,13 @@ unsafe fn fft3_loop(
 
     #[cfg(test)]
     if layer == 5 && index_h == 0 {
-        println!("[SIMD] Output after fft3 (first 16 from dst): {:?}",
-                 std::slice::from_raw_parts(dst, 16).iter().map(|&x| x).collect::<Vec<_>>());
+        println!(
+            "[SIMD] Output after fft3 (first 16 from dst): {:?}",
+            std::slice::from_raw_parts(dst, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -373,9 +409,18 @@ unsafe fn fft1_loop(
 ) {
     #[cfg(test)]
     if layer == 8 && index == 0 {
-        println!("[SIMD fft1_loop] layer={}, twiddle_dbl[0].len()={}", layer, twiddle_dbl[0].len());
-        println!("[SIMD] Input (first 16 from src): {:?}",
-                 std::slice::from_raw_parts(src, 16).iter().map(|&x| x).collect::<Vec<_>>());
+        println!(
+            "[SIMD fft1_loop] layer={}, twiddle_dbl[0].len()={}",
+            layer,
+            twiddle_dbl[0].len()
+        );
+        println!(
+            "[SIMD] Input (first 16 from src): {:?}",
+            std::slice::from_raw_parts(src, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
     }
 
     let offset = index << (layer + 1);
@@ -393,8 +438,13 @@ unsafe fn fft1_loop(
 
     #[cfg(test)]
     if layer == 8 && index == 0 {
-        println!("[SIMD] Output (first 16 from dst): {:?}",
-                 std::slice::from_raw_parts(dst, 16).iter().map(|&x| x).collect::<Vec<_>>());
+        println!(
+            "[SIMD] Output (first 16 from dst): {:?}",
+            std::slice::from_raw_parts(dst, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
     }
 }
 

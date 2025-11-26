@@ -1,12 +1,11 @@
 //! Metal accumulation operations.
 
+use super::context::MetalContext;
+use super::MetalBackend;
 use crate::core::fields::qm31::SecureField;
 use crate::prover::backend::simd::SimdBackend;
 use crate::prover::secure_column::SecureColumnByCoords;
 use crate::prover::AccumulationOps;
-
-use super::MetalBackend;
-use super::context::MetalContext;
 
 impl AccumulationOps for MetalBackend {
     fn accumulate(column: &mut SecureColumnByCoords<Self>, other: &SecureColumnByCoords<Self>) {
@@ -31,7 +30,11 @@ impl AccumulationOps for MetalBackend {
                 encoder.set_buffer(0, Some(dst_col.buffer()), 0);
                 encoder.set_buffer(1, Some(src_col.buffer()), 0);
                 let count = len as u32;
-                encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &count as *const u32 as *const _);
+                encoder.set_bytes(
+                    2,
+                    std::mem::size_of::<u32>() as u64,
+                    &count as *const u32 as *const _,
+                );
 
                 let threads_per_grid = metal::MTLSize::new(len as u64, 1, 1);
                 let threads_per_threadgroup = metal::MTLSize::new(256.min(len as u64), 1, 1);

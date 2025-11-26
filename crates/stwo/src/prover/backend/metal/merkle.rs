@@ -1,18 +1,18 @@
 //! Metal Merkle operations.
 
-use metal::{Buffer, MTLResourceOptions};
 use std::sync::{Arc, Mutex};
 
+use metal::{Buffer, MTLResourceOptions};
+
+use super::context::MetalContext;
+use super::thresholds::MIN_MERKLE_LOG_SIZE;
+use super::MetalBackend;
 use crate::core::fields::m31::BaseField;
 use crate::core::vcs::blake2_hash::Blake2sHash;
 use crate::core::vcs::blake2_merkle::{Blake2sM31MerkleHasher, Blake2sMerkleHasher};
 use crate::prover::backend::simd::SimdBackend;
 use crate::prover::backend::{Col, Column, ColumnOps};
 use crate::prover::vcs::ops::MerkleOps;
-
-use super::context::MetalContext;
-use super::thresholds::MIN_MERKLE_LOG_SIZE;
-use super::MetalBackend;
 
 /// Lazy GPU-backed column for Blake2s hashes.
 #[derive(Clone)]
@@ -80,10 +80,7 @@ impl MetalBlake2sColumn {
         self.ensure_synced();
 
         let output_data = unsafe {
-            std::slice::from_raw_parts(
-                self.buffer.contents() as *const u32,
-                self.len * 8,
-            )
+            std::slice::from_raw_parts(self.buffer.contents() as *const u32, self.len * 8)
         };
 
         let hash_u32s: [u32; 8] = [
@@ -110,7 +107,10 @@ impl std::fmt::Debug for MetalBlake2sColumn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MetalBlake2sColumn")
             .field("len", &self.len)
-            .field("synced", &matches!(*self.sync_state.lock().unwrap(), SyncState::Synced))
+            .field(
+                "synced",
+                &matches!(*self.sync_state.lock().unwrap(), SyncState::Synced),
+            )
             .finish()
     }
 }
@@ -128,10 +128,7 @@ impl Column<Blake2sHash> for MetalBlake2sColumn {
         self.ensure_synced();
 
         let output_data = unsafe {
-            std::slice::from_raw_parts(
-                self.buffer.contents() as *const u32,
-                self.len * 8,
-            )
+            std::slice::from_raw_parts(self.buffer.contents() as *const u32, self.len * 8)
         };
 
         let mut result = Vec::with_capacity(self.len);
@@ -269,12 +266,8 @@ fn commit_tree_batched<H: Into<bool>>(
     let mut results = Vec::new();
     for i in 1..=num_layers as usize {
         let (num_elems, buffer) = &layer_buffers[i];
-        let output_data = unsafe {
-            std::slice::from_raw_parts(
-                buffer.contents() as *const u32,
-                num_elems * 8,
-            )
-        };
+        let output_data =
+            unsafe { std::slice::from_raw_parts(buffer.contents() as *const u32, num_elems * 8) };
 
         let mut layer_result = Vec::with_capacity(*num_elems);
         for j in 0..*num_elems {
@@ -312,13 +305,18 @@ impl MerkleOps<Blake2sMerkleHasher> for MetalBackend {
         prev_layer: Option<&MetalBlake2sColumn>,
         columns: &[&Col<Self, BaseField>],
     ) -> MetalBlake2sColumn {
-        let _timer = crate::metal_profile_fn!("merkle_blake2s", "CPU/GPU", log_size = log_size, num_columns = columns.len());
+        let _timer = crate::metal_profile_fn!(
+            "merkle_blake2s",
+            "CPU/GPU",
+            log_size = log_size,
+            num_columns = columns.len()
+        );
 
         // Fall back to SIMD for small sizes or when columns are present
         // (column hashing not yet implemented in Metal)
         if log_size < MIN_MERKLE_LOG_SIZE || !columns.is_empty() || prev_layer.is_none() {
-            use crate::prover::backend::Column;
             use crate::prover::backend::simd::column::BaseColumn;
+            use crate::prover::backend::Column;
 
             // Convert Metal columns to SIMD
             let simd_columns_owned: Vec<BaseColumn> = columns
@@ -349,10 +347,7 @@ impl MerkleOps<Blake2sMerkleHasher> for MetalBackend {
 
         // Allocate output buffer (GPU will write all values)
         let parents_size = (num_parents * 8 * std::mem::size_of::<u32>()) as u64;
-        let parents_buffer = device.new_buffer(
-            parents_size,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let parents_buffer = device.new_buffer(parents_size, MTLResourceOptions::StorageModeShared);
 
         let is_m31_output: bool = false;
         let size_param = num_parents as u32;
@@ -409,12 +404,17 @@ impl MerkleOps<Blake2sM31MerkleHasher> for MetalBackend {
         prev_layer: Option<&MetalBlake2sColumn>,
         columns: &[&Col<Self, BaseField>],
     ) -> MetalBlake2sColumn {
-        let _timer = crate::metal_profile_fn!("merkle_m31", "CPU/GPU", log_size = log_size, num_columns = columns.len());
+        let _timer = crate::metal_profile_fn!(
+            "merkle_m31",
+            "CPU/GPU",
+            log_size = log_size,
+            num_columns = columns.len()
+        );
 
         // Fall back to SIMD for small sizes
         if log_size < MIN_MERKLE_LOG_SIZE {
-            use crate::prover::backend::Column;
             use crate::prover::backend::simd::column::BaseColumn;
+            use crate::prover::backend::Column;
 
             // Convert Metal columns to SIMD
             let simd_columns_owned: Vec<BaseColumn> = columns
@@ -447,17 +447,14 @@ impl MerkleOps<Blake2sM31MerkleHasher> for MetalBackend {
             let num_columns = columns.len();
 
             // Allocate persistent buffers (not pooled, owned by column)
-            let columns_buffer_size = (num_columns * domain_size * std::mem::size_of::<u32>()) as u64;
-            let columns_buffer = device.new_buffer(
-                columns_buffer_size,
-                MTLResourceOptions::StorageModeShared,
-            );
+            let columns_buffer_size =
+                (num_columns * domain_size * std::mem::size_of::<u32>()) as u64;
+            let columns_buffer =
+                device.new_buffer(columns_buffer_size, MTLResourceOptions::StorageModeShared);
 
             let output_size = (domain_size * 8 * std::mem::size_of::<u32>()) as u64;
-            let output_buffer = device.new_buffer(
-                output_size,
-                MTLResourceOptions::StorageModeShared,
-            );
+            let output_buffer =
+                device.new_buffer(output_size, MTLResourceOptions::StorageModeShared);
 
             let command_buffer = ctx.command_queue().new_command_buffer();
 
@@ -476,19 +473,39 @@ impl MerkleOps<Blake2sM31MerkleHasher> for MetalBackend {
             encoder.set_compute_pipeline_state(ctx.merkle_leaf_pipeline());
             encoder.set_buffer(0, Some(&columns_buffer), 0);
             let num_columns_u32 = num_columns as u32;
-            encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &num_columns_u32 as *const u32 as *const _);
+            encoder.set_bytes(
+                1,
+                std::mem::size_of::<u32>() as u64,
+                &num_columns_u32 as *const u32 as *const _,
+            );
             let domain_size_u32 = domain_size as u32;
-            encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &domain_size_u32 as *const u32 as *const _);
+            encoder.set_bytes(
+                2,
+                std::mem::size_of::<u32>() as u64,
+                &domain_size_u32 as *const u32 as *const _,
+            );
             let is_m31_output = true;
-            encoder.set_bytes(3, std::mem::size_of::<bool>() as u64, &is_m31_output as *const bool as *const _);
+            encoder.set_bytes(
+                3,
+                std::mem::size_of::<bool>() as u64,
+                &is_m31_output as *const bool as *const _,
+            );
             encoder.set_buffer(4, Some(&output_buffer), 0);
 
             let num_threads = domain_size as u64;
             let threadgroup_size = 256.min(num_threads.max(1));
             let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
             encoder.dispatch_thread_groups(
-                metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-                metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: threadgroups,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: threadgroup_size,
+                    height: 1,
+                    depth: 1,
+                },
             );
 
             encoder.end_encoding();
@@ -508,10 +525,7 @@ impl MerkleOps<Blake2sM31MerkleHasher> for MetalBackend {
 
         // Allocate output buffer (not pooled, owned by column)
         let parents_size = (num_parents * 8 * std::mem::size_of::<u32>()) as u64;
-        let parents_buffer = device.new_buffer(
-            parents_size,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let parents_buffer = device.new_buffer(parents_size, MTLResourceOptions::StorageModeShared);
 
         let is_m31_output: bool = true; // M31 reduction enabled
         let size_param = num_parents as u32;
@@ -566,7 +580,12 @@ impl MerkleOps<Blake2sM31MerkleHasher> for MetalBackend {
         initial_layer: &Col<Self, Blake2sHash>,
         num_layers: u32,
     ) -> Vec<Col<Self, Blake2sHash>> {
-        let _timer = crate::metal_profile_fn!("merkle_m31_batched", "GPU", num_layers = num_layers, initial_size = initial_layer.len());
+        let _timer = crate::metal_profile_fn!(
+            "merkle_m31_batched",
+            "GPU",
+            num_layers = num_layers,
+            initial_size = initial_layer.len()
+        );
 
         // Use layer-by-layer with lazy sync
         Self::commit_node_layers_batched_default(initial_layer, num_layers)
@@ -584,7 +603,11 @@ impl MetalBackend {
         let mut log_size = initial_layer.len().ilog2() - 1;
 
         for _ in 0..num_layers {
-            let layer = <Self as MerkleOps<Blake2sM31MerkleHasher>>::commit_on_layer(log_size, Some(prev_layer), &[]);
+            let layer = <Self as MerkleOps<Blake2sM31MerkleHasher>>::commit_on_layer(
+                log_size,
+                Some(prev_layer),
+                &[],
+            );
             layers.push(layer);
             prev_layer = layers.last().unwrap();
             log_size = log_size.saturating_sub(1);

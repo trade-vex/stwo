@@ -169,7 +169,10 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             });
 
         if let Some(start) = _eval_start {
-            eprintln!("[PROFILE] eval_at_point_loop | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] eval_at_point_loop | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
         span.exit();
         let sampled_values = samples
@@ -191,7 +194,10 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             self.config.fri_config.log_blowup_factor,
         );
         if let Some(start) = _quot_start {
-            eprintln!("[PROFILE] compute_fri_quotients | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] compute_fri_quotients | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         // Run FRI commitment phase on the oods quotients.
@@ -203,7 +209,10 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
         let fri_prover =
             FriProver::<B, MC>::commit(channel, self.config.fri_config, &quotients, self.twiddles);
         if let Some(start) = _fri_commit_start {
-            eprintln!("[PROFILE] fri_commit | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] fri_commit | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         // Proof of work.
@@ -215,7 +224,10 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
         };
         let proof_of_work = B::grind(channel, self.config.pow_bits);
         if let Some(start) = _grind_start {
-            eprintln!("[PROFILE] grind_pow | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] grind_pow | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
         span1.exit();
         channel.mix_u64(proof_of_work);
@@ -232,7 +244,10 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             unsorted_query_locations,
         } = fri_prover.decommit(channel);
         if let Some(start) = _fri_decommit_start {
-            eprintln!("[PROFILE] fri_decommit | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] fri_decommit | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         // Decommit the FRI queries on the merkle trees.

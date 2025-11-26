@@ -3,14 +3,13 @@
 use bytemuck::cast_slice;
 use metal::MTLResourceOptions;
 
+use super::channel::MetalBlake2sChannelGeneric;
+use super::context::MetalContext;
+use super::MetalBackend;
 use crate::core::channel::Blake2sChannelGeneric;
 use crate::core::proof_of_work::GrindOps;
 use crate::core::vcs::blake2_hash::Blake2sHasherGeneric;
 use crate::prover::backend::simd::SimdBackend;
-
-use super::channel::MetalBlake2sChannelGeneric;
-use super::context::MetalContext;
-use super::MetalBackend;
 
 // Batch size per GPU thread (each thread tries this many sequential nonces)
 const BATCH_SIZE: u32 = 1024;
@@ -121,7 +120,10 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> f
 
             // Safety check: prevent infinite loop
             if batch_id > 1000 {
-                panic!("Grinding failed to find solution after {} batches", batch_id);
+                panic!(
+                    "Grinding failed to find solution after {} batches",
+                    batch_id
+                );
             }
         }
     }
@@ -129,7 +131,9 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> f
 
 // GrindOps implementation for GPU-resident channel
 // Uses the same GPU grinding logic as CPU channel since digest format is compatible
-impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPUT>> for MetalBackend {
+impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPUT>>
+    for MetalBackend
+{
     fn grind(channel: &MetalBlake2sChannelGeneric<IS_M31_OUTPUT>, pow_bits: u32) -> u64 {
         assert!(pow_bits <= 32, "pow_bits > 32 is not supported");
 
@@ -226,7 +230,10 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPU
 
             // Safety check: prevent infinite loop
             if batch_id > 1000 {
-                panic!("Grinding failed to find solution after {} batches", batch_id);
+                panic!(
+                    "Grinding failed to find solution after {} batches",
+                    batch_id
+                );
             }
         }
     }
@@ -234,11 +241,10 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPU
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod poseidon252 {
+    use super::MetalBackend;
     use crate::core::channel::Poseidon252Channel;
     use crate::core::proof_of_work::GrindOps;
     use crate::prover::backend::simd::SimdBackend;
-
-    use super::MetalBackend;
 
     impl GrindOps<Poseidon252Channel> for MetalBackend {
         fn grind(channel: &Poseidon252Channel, pow_bits: u32) -> u64 {

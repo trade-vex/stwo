@@ -9,12 +9,12 @@ use stwo::core::fields::m31::BaseField;
 use stwo::core::pcs::TreeVec;
 use stwo::core::poly::circle::CanonicCoset;
 use stwo::core::utils::bit_reverse;
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+use stwo::prover::backend::metal::MetalBackend;
 use stwo::prover::backend::simd::column::VeryPackedSecureColumnByCoords;
 use stwo::prover::backend::simd::m31::LOG_N_LANES;
 use stwo::prover::backend::simd::very_packed_m31::{VeryPackedBaseField, LOG_N_VERY_PACKED_ELEMS};
 use stwo::prover::backend::simd::SimdBackend;
-#[cfg(all(target_os = "macos", feature = "metal_prover"))]
-use stwo::prover::backend::metal::MetalBackend;
 use stwo::prover::poly::circle::{CircleEvaluation, PolyOps};
 use stwo::prover::poly::BitReversedOrder;
 use stwo::prover::secure_column::SecureColumnByCoords;
@@ -206,7 +206,10 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
                 .as_cols_ref()
                 .map_cols(|col| Cow::Owned(col.get_evaluation_on_domain(eval_domain, &twiddles)));
             if let Some(start) = _ext_start {
-                eprintln!("[PROFILE] constraint_extension (FFT) | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+                eprintln!(
+                    "[PROFILE] constraint_extension (FFT) | time={:.3}ms",
+                    start.elapsed().as_secs_f64() * 1000.0
+                );
             }
             result
         } else {
@@ -255,8 +258,11 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
                 *accum.col = gpu_result.output;
 
                 if let Some(start) = _gpu_start {
-                    eprintln!("[PROFILE] constraint_eval_gpu | log_size={}, time={:.3}ms",
-                             trace_domain.log_size(), start.elapsed().as_secs_f64() * 1000.0);
+                    eprintln!(
+                        "[PROFILE] constraint_eval_gpu | log_size={}, time={:.3}ms",
+                        trace_domain.log_size(),
+                        start.elapsed().as_secs_f64() * 1000.0
+                    );
                 }
                 return;
             }
@@ -297,11 +303,14 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             let cpu_vals = c.to_cpu();
             CircleEvaluation::<SimdBackend, BaseField, BitReversedOrder>::new(
                 c.domain,
-                cpu_vals.into_iter().collect()
+                cpu_vals.into_iter().collect(),
             )
         });
         if let Some(start) = _convert_start {
-            eprintln!("[PROFILE] metal_to_simd_conversion | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] metal_to_simd_conversion | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         let _eval_start = if std::env::var("METAL_PROFILE").is_ok() {
@@ -342,7 +351,8 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
 
                 unsafe {
                     let denom_inv = VeryPackedBaseField::broadcast(
-                        denom_inv[vec_row >> (trace_domain.log_size() - LOG_N_LANES - LOG_N_VERY_PACKED_ELEMS)],
+                        denom_inv[vec_row
+                            >> (trace_domain.log_size() - LOG_N_LANES - LOG_N_VERY_PACKED_ELEMS)],
                     );
                     chunk.set_packed(
                         idx_in_chunk,
@@ -352,7 +362,10 @@ impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkCompone
             }
         });
         if let Some(start) = _eval_start {
-            eprintln!("[PROFILE] constraint_eval_simd_loop | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[PROFILE] constraint_eval_simd_loop | time={:.3}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         let result_cpu = simd_col.to_cpu();

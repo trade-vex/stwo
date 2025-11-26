@@ -66,7 +66,10 @@ pub fn prove_ex<B: BackendForChannel<MC>, MC: MerkleChannel>(
     let composition_poly = component_provers.compute_composition_polynomial(random_coeff, &trace);
     let composition_log_size = composition_poly.log_size();
     if let Some(start) = _comp_start {
-        eprintln!("[CPU_PROFILE] compute_composition_polynomial | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        eprintln!(
+            "[CPU_PROFILE] compute_composition_polynomial | time={:.3}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
     span1.exit();
 
@@ -84,7 +87,10 @@ pub fn prove_ex<B: BackendForChannel<MC>, MC: MerkleChannel>(
     tree_builder.extend_polys(right_comp_poly_half.into_coordinate_polys());
     tree_builder.commit(channel);
     if let Some(start) = _commit_start {
-        eprintln!("[CPU_PROFILE] composition_commit | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        eprintln!(
+            "[CPU_PROFILE] composition_commit | time={:.3}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
     span.exit();
 
@@ -105,7 +111,10 @@ pub fn prove_ex<B: BackendForChannel<MC>, MC: MerkleChannel>(
     };
     let commitment_scheme_proof = commitment_scheme.prove_values(sample_points, channel);
     if let Some(start) = _prove_start {
-        eprintln!("[CPU_PROFILE] prove_values (FRI) | time={:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        eprintln!(
+            "[CPU_PROFILE] prove_values (FRI) | time={:.3}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
     let proof = StarkProof(commitment_scheme_proof.proof);
     info!(proof_size_estimate = proof.size_estimate());

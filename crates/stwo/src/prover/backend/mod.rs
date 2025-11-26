@@ -15,9 +15,9 @@ use crate::prover::vcs::ops::MerkleOps;
 use crate::prover::{AccumulationOps, QuotientOps};
 
 pub mod cpu;
-pub mod simd;
 #[cfg(all(target_os = "macos", feature = "metal_prover"))]
 pub mod metal;
+pub mod simd;
 
 pub trait Backend:
     Copy

@@ -3,9 +3,10 @@
 //! This module provides a pool of reusable Metal buffers to reduce allocation overhead.
 //! Buffers are organized by size and can be checked out and returned to the pool.
 
-use metal::{Buffer, Device, MTLResourceOptions};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use metal::{Buffer, Device, MTLResourceOptions};
 
 /// Size bucket for buffer pooling (power of 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -77,10 +78,7 @@ impl BufferPool {
         // Try to get a buffer from the pool
         let buffer = {
             let mut available = self.available.lock().unwrap();
-            available
-                .entry(bucket)
-                .or_insert_with(Vec::new)
-                .pop()
+            available.entry(bucket).or_insert_with(Vec::new).pop()
         };
 
         let buffer = if let Some(buffer) = buffer {
@@ -160,8 +158,10 @@ impl Drop for PooledBuffer {
         unsafe {
             let pool = &*self.pool;
             // Take ownership of buffer to return it
-            let buffer = std::mem::replace(&mut self.buffer,
-                pool.device.new_buffer(1, MTLResourceOptions::empty()));
+            let buffer = std::mem::replace(
+                &mut self.buffer,
+                pool.device.new_buffer(1, MTLResourceOptions::empty()),
+            );
             pool.return_buffer(self.bucket, buffer);
         }
     }
@@ -183,14 +183,8 @@ impl GlobalPools {
     /// Create global buffer pools for the given device.
     pub fn new(device: Device) -> Self {
         Self {
-            shared: BufferPool::new(
-                device.clone(),
-                MTLResourceOptions::StorageModeShared,
-            ),
-            private: BufferPool::new(
-                device,
-                MTLResourceOptions::StorageModePrivate,
-            ),
+            shared: BufferPool::new(device.clone(), MTLResourceOptions::StorageModeShared),
+            private: BufferPool::new(device, MTLResourceOptions::StorageModePrivate),
         }
     }
 }

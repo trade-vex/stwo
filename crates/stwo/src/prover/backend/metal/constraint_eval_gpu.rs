@@ -1,21 +1,21 @@
 //! GPU constraint evaluation dispatcher.
 
-use metal::{Buffer, MTLResourceOptions};
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::core::fields::m31::BaseField;
-use crate::core::fields::qm31::SecureField;
-use crate::core::poly::circle::CanonicCoset;
-use crate::prover::poly::circle::CircleEvaluation;
-use crate::prover::poly::BitReversedOrder;
-use crate::prover::backend::metal::MetalBackend;
-use crate::core::pcs::TreeVec;
-use crate::core::utils::bit_reverse;
-use crate::prover::secure_column::SecureColumnByCoords;
+use metal::{Buffer, MTLResourceOptions};
 
 use super::context::MetalContext;
+use crate::core::fields::m31::BaseField;
+use crate::core::fields::qm31::SecureField;
+use crate::core::pcs::TreeVec;
+use crate::core::poly::circle::CanonicCoset;
+use crate::core::utils::bit_reverse;
+use crate::prover::backend::metal::MetalBackend;
+use crate::prover::poly::circle::CircleEvaluation;
+use crate::prover::poly::BitReversedOrder;
+use crate::prover::secure_column::SecureColumnByCoords;
 
 struct ReshapedTraceCache {
     key: Option<(u64, usize)>,
@@ -36,7 +36,13 @@ impl ReshapedTraceCache {
         self.key == Some((trace_hash, eval_domain_size)) && self.trace_buffer.is_some()
     }
 
-    fn store(&mut self, trace_hash: u64, eval_domain_size: usize, trace_buffer: Buffer, column_offsets: Vec<u32>) {
+    fn store(
+        &mut self,
+        trace_hash: u64,
+        eval_domain_size: usize,
+        trace_buffer: Buffer,
+        column_offsets: Vec<u32>,
+    ) {
         self.key = Some((trace_hash, eval_domain_size));
         self.trace_buffer = Some(trace_buffer);
         self.column_offsets = column_offsets;
@@ -45,7 +51,7 @@ impl ReshapedTraceCache {
     fn get(&self) -> (Buffer, Vec<u32>) {
         (
             self.trace_buffer.as_ref().unwrap().clone(),
-            self.column_offsets.clone()
+            self.column_offsets.clone(),
         )
     }
 
@@ -61,7 +67,9 @@ thread_local! {
     static RESHAPED_TRACE_CACHE: RefCell<ReshapedTraceCache> = RefCell::new(ReshapedTraceCache::new());
 }
 
-fn hash_trace(trace: &TreeVec<Vec<&CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>>>) -> u64 {
+fn hash_trace(
+    trace: &TreeVec<Vec<&CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>>>,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
 
     trace.len().hash(&mut hasher);
@@ -158,7 +166,7 @@ fn reshape_trace_columns_gpu(
             trace_hash,
             eval_domain_size,
             output_buffer.clone(),
-            column_offsets.clone()
+            column_offsets.clone(),
         );
     });
 
@@ -189,7 +197,12 @@ pub fn evaluate_constraints_gpu(
         .iter()
         .flat_map(|qm31| {
             let m31_array = qm31.to_m31_array();
-            [m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0]
+            [
+                m31_array[0].0,
+                m31_array[1].0,
+                m31_array[2].0,
+                m31_array[3].0,
+            ]
         })
         .collect();
 
@@ -224,7 +237,12 @@ pub fn evaluate_constraints_gpu(
         .flat_map(|row_idx| {
             let denom_inv = denom_invs[row_idx >> trace_domain.log_size()];
             let m31_array = denom_inv.to_m31_array();
-            [m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0]
+            [
+                m31_array[0].0,
+                m31_array[1].0,
+                m31_array[2].0,
+                m31_array[3].0,
+            ]
         })
         .collect();
 

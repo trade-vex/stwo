@@ -4,9 +4,10 @@
 //! in a single large buffer with offset tracking instead of allocating separate
 //! buffers for each layer.
 
-use metal::{Buffer, Device, MTLResourceOptions};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use metal::{Buffer, Device, MTLResourceOptions};
 
 /// A handle to a twiddle section within the flat buffer.
 #[derive(Debug, Clone, Copy)]
@@ -95,22 +96,21 @@ impl FlatTwiddleManager {
         // Store in cache
         {
             let mut cache = self.cache.lock().unwrap();
-            cache.insert(cache_key, FlatTwiddleBuffer {
-                buffer: flat_buffer.buffer.clone(),
-                sections: flat_buffer.sections.clone(),
-                total_size: flat_buffer.total_size,
-            });
+            cache.insert(
+                cache_key,
+                FlatTwiddleBuffer {
+                    buffer: flat_buffer.buffer.clone(),
+                    sections: flat_buffer.sections.clone(),
+                    total_size: flat_buffer.total_size,
+                },
+            );
         }
 
         flat_buffer
     }
 
     /// Create a new flat buffer from twiddle layers.
-    fn create_flat_buffer(
-        &self,
-        device: &Device,
-        twiddle_layers: &[&[u32]],
-    ) -> FlatTwiddleBuffer {
+    fn create_flat_buffer(&self, device: &Device, twiddle_layers: &[&[u32]]) -> FlatTwiddleBuffer {
         // Calculate total size and sections
         let mut sections = Vec::with_capacity(twiddle_layers.len());
         let mut current_offset = 0u64;
@@ -168,21 +168,11 @@ impl Default for FlatTwiddleManager {
 #[allow(dead_code)]
 pub trait TwiddleEncoderExt {
     /// Set buffer with offset for a specific twiddle section.
-    fn set_twiddle_section(
-        &self,
-        index: usize,
-        buffer: &Buffer,
-        section: TwiddleSection,
-    );
+    fn set_twiddle_section(&self, index: usize, buffer: &Buffer, section: TwiddleSection);
 }
 
 impl TwiddleEncoderExt for metal::ComputeCommandEncoderRef {
-    fn set_twiddle_section(
-        &self,
-        index: usize,
-        buffer: &Buffer,
-        section: TwiddleSection,
-    ) {
+    fn set_twiddle_section(&self, index: usize, buffer: &Buffer, section: TwiddleSection) {
         // Set the buffer at the given index with the section's offset
         self.set_buffer(index as u64, Some(buffer), section.offset);
     }

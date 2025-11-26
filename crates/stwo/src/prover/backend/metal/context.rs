@@ -8,20 +8,19 @@
 //! The context is lazily initialized on first use and can be safely shared
 //! across threads using `MetalContextHandle`.
 
-use metal::{
-    Buffer, CommandQueue, CompileOptions, ComputePipelineState, Device, Library,
-    MTLResourceOptions,
-};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use metal::{
+    Buffer, CommandQueue, CompileOptions, ComputePipelineState, Device, Library, MTLResourceOptions,
+};
+
+use super::buffer_pool::GlobalPools;
+use super::shaders;
+use super::twiddle_manager::FlatTwiddleManager;
 use crate::core::poly::circle::CircleDomain;
 use crate::core::utils::bit_reverse_index;
 use crate::prover::backend::Column;
-
-use super::shaders;
-use super::twiddle_manager::FlatTwiddleManager;
-use super::buffer_pool::GlobalPools;
 
 /// Global Metal context singleton.
 static METAL_CONTEXT: OnceLock<Arc<MetalContext>> = OnceLock::new();
@@ -156,8 +155,7 @@ impl MetalContext {
     /// Panics if Metal device is not available or shader compilation fails.
     fn new() -> Result<Self, String> {
         // Get default Metal device
-        let device = Device::system_default()
-            .ok_or_else(|| "No Metal device found".to_string())?;
+        let device = Device::system_default().ok_or_else(|| "No Metal device found".to_string())?;
 
         // Create command queue
         let command_queue = device.new_command_queue();
@@ -184,31 +182,47 @@ impl MetalContext {
         let ifft_radix8_pipeline = Self::create_pipeline(&device, &library, "circle_ifft_radix8")?;
         let fft_radix2_pipeline = Self::create_pipeline(&device, &library, "circle_fft_radix2")?;
         let ifft_radix2_pipeline = Self::create_pipeline(&device, &library, "circle_ifft_radix2")?;
-        let fft_vecwise_fused_pipeline = Self::create_pipeline(&device, &library, "circle_fft_vecwise_fused")?;
-        let ifft_normalize_pipeline = Self::create_pipeline(&device, &library, "ifft_normalize_m31")?;
+        let fft_vecwise_fused_pipeline =
+            Self::create_pipeline(&device, &library, "circle_fft_vecwise_fused")?;
+        let ifft_normalize_pipeline =
+            Self::create_pipeline(&device, &library, "ifft_normalize_m31")?;
         let fri_fold_circle_pipeline =
             Self::create_pipeline(&device, &library, "fri_fold_circle_into_line")?;
         let fri_fold_line_pipeline = Self::create_pipeline(&device, &library, "fri_fold_line")?;
         let fri_decompose_pipeline = Self::create_pipeline(&device, &library, "fri_decompose")?;
-        let fri_decompose_sum_pipeline = Self::create_pipeline(&device, &library, "fri_decompose_sum")?;
+        let fri_decompose_sum_pipeline =
+            Self::create_pipeline(&device, &library, "fri_decompose_sum")?;
         let quotient_pipeline = Self::create_pipeline(&device, &library, "quotient_accumulate")?;
         let merkle_pipeline = Self::create_pipeline(&device, &library, "merkle_blake2s")?;
         let merkle_leaf_pipeline = Self::create_pipeline(&device, &library, "merkle_blake2s_leaf")?;
-        let mle_fold_m31_pipeline = Self::create_pipeline(&device, &library, "mle_fold_m31_to_qm31")?;
-        let mle_fold_qm31_pipeline = Self::create_pipeline(&device, &library, "mle_fold_qm31_to_qm31")?;
+        let mle_fold_m31_pipeline =
+            Self::create_pipeline(&device, &library, "mle_fold_m31_to_qm31")?;
+        let mle_fold_qm31_pipeline =
+            Self::create_pipeline(&device, &library, "mle_fold_qm31_to_qm31")?;
         let grind_pipeline = Self::create_pipeline(&device, &library, "grind_pow")?;
-        let pack_coords_to_qm31_pipeline = Self::create_pipeline(&device, &library, "pack_coords_to_qm31")?;
-        let unpack_qm31_to_coords_pipeline = Self::create_pipeline(&device, &library, "unpack_qm31_to_coords")?;
-        let fri_fold_line_coords_pipeline = Self::create_pipeline(&device, &library, "fri_fold_line_coords")?;
-        let fri_fold_circle_into_line_coords_pipeline = Self::create_pipeline(&device, &library, "fri_fold_circle_into_line_coords")?;
-        let blake2s_channel_mix_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix")?;
-        let blake2s_channel_draw_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_draw")?;
-        let blake2s_channel_mix_felts_pipeline = Self::create_pipeline(&device, &library, "blake2s_channel_mix_felts")?;
+        let pack_coords_to_qm31_pipeline =
+            Self::create_pipeline(&device, &library, "pack_coords_to_qm31")?;
+        let unpack_qm31_to_coords_pipeline =
+            Self::create_pipeline(&device, &library, "unpack_qm31_to_coords")?;
+        let fri_fold_line_coords_pipeline =
+            Self::create_pipeline(&device, &library, "fri_fold_line_coords")?;
+        let fri_fold_circle_into_line_coords_pipeline =
+            Self::create_pipeline(&device, &library, "fri_fold_circle_into_line_coords")?;
+        let blake2s_channel_mix_pipeline =
+            Self::create_pipeline(&device, &library, "blake2s_channel_mix")?;
+        let blake2s_channel_draw_pipeline =
+            Self::create_pipeline(&device, &library, "blake2s_channel_draw")?;
+        let blake2s_channel_mix_felts_pipeline =
+            Self::create_pipeline(&device, &library, "blake2s_channel_mix_felts")?;
         let accumulate_m31_pipeline = Self::create_pipeline(&device, &library, "accumulate_m31")?;
-        let eval_at_point_pipeline = Self::create_pipeline(&device, &library, "circle_eval_at_point")?;
-        let constraint_eval_vm_pipeline = Self::create_pipeline(&device, &library, "constraint_eval_vm")?;
-        let trace_reshape_column_pipeline = Self::create_pipeline(&device, &library, "trace_reshape_column")?;
-        let trace_reshape_batch_pipeline = Self::create_pipeline(&device, &library, "trace_reshape_batch")?;
+        let eval_at_point_pipeline =
+            Self::create_pipeline(&device, &library, "circle_eval_at_point")?;
+        let constraint_eval_vm_pipeline =
+            Self::create_pipeline(&device, &library, "constraint_eval_vm")?;
+        let trace_reshape_column_pipeline =
+            Self::create_pipeline(&device, &library, "trace_reshape_column")?;
+        let trace_reshape_batch_pipeline =
+            Self::create_pipeline(&device, &library, "trace_reshape_batch")?;
 
         let buffer_pools = GlobalPools::new(device.clone());
 
@@ -270,9 +284,7 @@ impl MetalContext {
     pub fn global() -> Arc<Self> {
         init_profiling_once();
         METAL_CONTEXT
-            .get_or_init(|| {
-                Arc::new(Self::new().expect("Failed to initialize Metal context"))
-            })
+            .get_or_init(|| Arc::new(Self::new().expect("Failed to initialize Metal context")))
             .clone()
     }
 
@@ -437,7 +449,8 @@ impl MetalContext {
         &self,
         twiddle_layers: &[&[u32]],
     ) -> super::twiddle_manager::FlatTwiddleBuffer {
-        self.flat_twiddle_manager.get_or_create_flat_buffer(&self.device, twiddle_layers)
+        self.flat_twiddle_manager
+            .get_or_create_flat_buffer(&self.device, twiddle_layers)
     }
 
     /// Check out a shared memory buffer from the pool.
@@ -555,7 +568,9 @@ impl MetalContext {
         let len = col0.len();
         let byte_size = (len * 4 * std::mem::size_of::<u32>()) as u64;
         // Create buffer directly without pool to avoid lifetime issues
-        let out = self.device().new_buffer(byte_size, MTLResourceOptions::StorageModeShared);
+        let out = self
+            .device()
+            .new_buffer(byte_size, MTLResourceOptions::StorageModeShared);
 
         let command_buffer = self.command_queue().new_command_buffer();
         let encoder = command_buffer.new_compute_command_encoder();
@@ -566,7 +581,11 @@ impl MetalContext {
         encoder.set_buffer(3, Some(col3.buffer()), 0);
         encoder.set_buffer(4, Some(&out), 0);
         let len_u32 = len as u32;
-        encoder.set_bytes(5, std::mem::size_of::<u32>() as u64, &len_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            5,
+            std::mem::size_of::<u32>() as u64,
+            &len_u32 as *const u32 as *const _,
+        );
 
         let tg_size = 256.min(len as u64);
         let groups = ((len as u64 + tg_size - 1) / tg_size).max(1);
@@ -589,10 +608,12 @@ impl MetalContext {
         let elem_bytes = std::mem::size_of::<u32>() as u64;
         // Create buffers directly without pool to avoid lifetime issues
         let cols: Vec<Buffer> = (0..4)
-            .map(|_| self.device().new_buffer(
-                len as u64 * elem_bytes,
-                MTLResourceOptions::StorageModeShared,
-            ))
+            .map(|_| {
+                self.device().new_buffer(
+                    len as u64 * elem_bytes,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            })
             .collect();
 
         let command_buffer = self.command_queue().new_command_buffer();
@@ -604,7 +625,11 @@ impl MetalContext {
         encoder.set_buffer(3, Some(&cols[2]), 0);
         encoder.set_buffer(4, Some(&cols[3]), 0);
         let len_u32 = len as u32;
-        encoder.set_bytes(5, std::mem::size_of::<u32>() as u64, &len_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            5,
+            std::mem::size_of::<u32>() as u64,
+            &len_u32 as *const u32 as *const _,
+        );
 
         let tg_size = 256.min(len as u64);
         let groups = ((len as u64 + tg_size - 1) / tg_size).max(1);
@@ -642,7 +667,11 @@ impl MetalContext {
         encoder.set_buffer(3, Some(col3.buffer()), 0);
         encoder.set_buffer(4, Some(out), 0);
         let len_u32 = len as u32;
-        encoder.set_bytes(5, std::mem::size_of::<u32>() as u64, &len_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            5,
+            std::mem::size_of::<u32>() as u64,
+            &len_u32 as *const u32 as *const _,
+        );
 
         let tg_size = 256.min(len as u64);
         let groups = ((len as u64 + tg_size - 1) / tg_size).max(1);
@@ -667,7 +696,11 @@ impl MetalContext {
         encoder.set_buffer(3, Some(&cols[2]), 0);
         encoder.set_buffer(4, Some(&cols[3]), 0);
         let len_u32 = len as u32;
-        encoder.set_bytes(5, std::mem::size_of::<u32>() as u64, &len_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            5,
+            std::mem::size_of::<u32>() as u64,
+            &len_u32 as *const u32 as *const _,
+        );
 
         let tg_size = 256.min(len as u64);
         let groups = ((len as u64 + tg_size - 1) / tg_size).max(1);

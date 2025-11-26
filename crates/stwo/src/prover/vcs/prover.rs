@@ -79,14 +79,19 @@ impl<B: MerkleOps<H>, H: MerkleHasher> MerkleProver<B, H> {
                     let mut scan_log_size = log_size;
 
                     // Count consecutive node-only layers
-                    while scan_log_size > 0 && columns.peek().map_or(true, |c| c.len().ilog2() < scan_log_size) {
+                    while scan_log_size > 0
+                        && columns
+                            .peek()
+                            .map_or(true, |c| c.len().ilog2() < scan_log_size)
+                    {
                         num_node_layers += 1;
                         scan_log_size -= 1;
                     }
 
                     // Batch if we have multiple node-only layers (threshold: 2+)
                     if num_node_layers >= 2 {
-                        let batched = B::commit_node_layers_batched(layers.last().unwrap(), num_node_layers);
+                        let batched =
+                            B::commit_node_layers_batched(layers.last().unwrap(), num_node_layers);
                         layers.extend(batched);
                         log_size = scan_log_size;
                     } else {

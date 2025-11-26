@@ -2,6 +2,9 @@
 
 use metal::MTLResourceOptions;
 
+use super::context::MetalContext;
+use super::thresholds::MIN_FRI_LOG_SIZE;
+use super::MetalBackend;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::poly::utils::domain_line_twiddles_from_tree;
@@ -12,10 +15,6 @@ use crate::prover::poly::circle::SecureEvaluation;
 use crate::prover::poly::twiddles::TwiddleTree;
 use crate::prover::poly::BitReversedOrder;
 use crate::prover::secure_column::SecureColumnByCoords;
-
-use super::context::MetalContext;
-use super::thresholds::MIN_FRI_LOG_SIZE;
-use super::MetalBackend;
 
 impl FriOps for MetalBackend {
     fn fold_line(
@@ -28,8 +27,8 @@ impl FriOps for MetalBackend {
 
         // Fall back to SIMD for small sizes
         if log_size < MIN_FRI_LOG_SIZE {
-            use crate::prover::backend::Column;
             use crate::prover::backend::simd::column::BaseColumn;
+            use crate::prover::backend::Column;
             use crate::prover::secure_column::SecureColumnByCoords;
 
             // Convert Metal eval to SIMD
@@ -38,7 +37,9 @@ impl FriOps for MetalBackend {
                 let simd_col: BaseColumn = cpu_vals.into_iter().collect();
                 simd_col
             });
-            let simd_values = SecureColumnByCoords { columns: simd_columns };
+            let simd_values = SecureColumnByCoords {
+                columns: simd_columns,
+            };
             let simd_eval = LineEvaluation::new(eval.domain(), simd_values);
 
             let simd_twiddles: &TwiddleTree<SimdBackend> =
@@ -92,15 +93,27 @@ impl FriOps for MetalBackend {
         encoder.set_buffer(7, Some(&out_cols[3]), 0);
         encoder.set_buffer(8, Some(&twiddle_buffer), 0);
         encoder.set_buffer(9, Some(&alpha_buffer), 0);
-        encoder.set_bytes(10, std::mem::size_of::<u32>() as u64, &log_size as *const u32 as *const _);
+        encoder.set_bytes(
+            10,
+            std::mem::size_of::<u32>() as u64,
+            &log_size as *const u32 as *const _,
+        );
 
         let num_threads = output_len as u64;
         let threadgroup_size = 256.min(num_threads.max(1));
         let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
 
         encoder.dispatch_thread_groups(
-            metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-            metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+            metal::MTLSize {
+                width: threadgroups,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: threadgroup_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         encoder.end_encoding();
@@ -127,8 +140,8 @@ impl FriOps for MetalBackend {
 
         // Fall back to SIMD for small sizes
         if log_size < MIN_FRI_LOG_SIZE {
-            use crate::prover::backend::Column;
             use crate::prover::backend::simd::column::BaseColumn;
+            use crate::prover::backend::Column;
 
             // Convert dst and src from Metal to SIMD
             let dst_domain = dst.domain();
@@ -137,7 +150,9 @@ impl FriOps for MetalBackend {
                 let simd_col: BaseColumn = cpu_vals.into_iter().collect();
                 simd_col
             });
-            let simd_dst_values = SecureColumnByCoords { columns: simd_dst_columns };
+            let simd_dst_values = SecureColumnByCoords {
+                columns: simd_dst_columns,
+            };
             let mut simd_dst = LineEvaluation::new(dst_domain, simd_dst_values);
 
             let simd_src_columns = src.values.columns.clone().map(|col| {
@@ -145,7 +160,9 @@ impl FriOps for MetalBackend {
                 let simd_col: BaseColumn = cpu_vals.into_iter().collect();
                 simd_col
             });
-            let simd_src_values = SecureColumnByCoords { columns: simd_src_columns };
+            let simd_src_values = SecureColumnByCoords {
+                columns: simd_src_columns,
+            };
             let simd_src = SecureEvaluation::new(src.domain, simd_src_values);
 
             let simd_twiddles: &TwiddleTree<SimdBackend> =
@@ -201,15 +218,27 @@ impl FriOps for MetalBackend {
         encoder.set_buffer(8, Some(&twiddle_buffer), 0);
         encoder.set_buffer(9, Some(&alpha_buffer), 0);
         encoder.set_buffer(10, Some(&alpha_sq_buffer), 0);
-        encoder.set_bytes(11, std::mem::size_of::<u32>() as u64, &log_size as *const u32 as *const _);
+        encoder.set_bytes(
+            11,
+            std::mem::size_of::<u32>() as u64,
+            &log_size as *const u32 as *const _,
+        );
 
         let num_threads = output_len as u64;
         let threadgroup_size = 256.min(num_threads.max(1));
         let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
 
         encoder.dispatch_thread_groups(
-            metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-            metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+            metal::MTLSize {
+                width: threadgroups,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: threadgroup_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         encoder.end_encoding();
@@ -234,12 +263,10 @@ impl FriOps for MetalBackend {
             let input_buffer = input_pooled.buffer();
 
             // Allocate buffer for partial sums (2 QM31 per threadgroup)
-            let num_threadgroups = 256usize;  // Use 256 threadgroups
+            let num_threadgroups = 256usize; // Use 256 threadgroups
             let partial_sums_size = (num_threadgroups * 2 * 4 * std::mem::size_of::<u32>()) as u64;
-            let partial_sums_buffer = device.new_buffer(
-                partial_sums_size,
-                MTLResourceOptions::StorageModeShared,
-            );
+            let partial_sums_buffer =
+                device.new_buffer(partial_sums_size, MTLResourceOptions::StorageModeShared);
 
             let command_buffer = ctx.command_queue().new_command_buffer();
             let encoder = command_buffer.new_compute_command_encoder();
@@ -259,14 +286,30 @@ impl FriOps for MetalBackend {
             encoder.set_buffer(0, Some(&input_buffer), 0);
             encoder.set_buffer(1, Some(&partial_sums_buffer), 0);
             let half_size_u32 = half_size as u32;
-            encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &half_size_u32 as *const u32 as *const _);
+            encoder.set_bytes(
+                2,
+                std::mem::size_of::<u32>() as u64,
+                &half_size_u32 as *const u32 as *const _,
+            );
             let grid_size = num_threadgroups * 256;
             let grid_size_u32 = grid_size as u32;
-            encoder.set_bytes(3, std::mem::size_of::<u32>() as u64, &grid_size_u32 as *const u32 as *const _);
+            encoder.set_bytes(
+                3,
+                std::mem::size_of::<u32>() as u64,
+                &grid_size_u32 as *const u32 as *const _,
+            );
 
             encoder.dispatch_thread_groups(
-                metal::MTLSize { width: num_threadgroups as u64, height: 1, depth: 1 },
-                metal::MTLSize { width: 256, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: num_threadgroups as u64,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
             );
 
             encoder.end_encoding();
@@ -280,8 +323,12 @@ impl FriOps for MetalBackend {
             for i in 0..num_threadgroups {
                 let a_qm31 = unsafe { &*partial_sums_ptr.offset((i * 2) as isize) };
                 let b_qm31 = unsafe { &*partial_sums_ptr.offset((i * 2 + 1) as isize) };
-                a_sum += SecureField::from_m31_array(std::array::from_fn(|j| BaseField::from(a_qm31[j])));
-                b_sum += SecureField::from_m31_array(std::array::from_fn(|j| BaseField::from(b_qm31[j])));
+                a_sum += SecureField::from_m31_array(std::array::from_fn(|j| {
+                    BaseField::from(a_qm31[j])
+                }));
+                b_sum += SecureField::from_m31_array(std::array::from_fn(|j| {
+                    BaseField::from(b_qm31[j])
+                }));
             }
 
             drop(input_pooled);
@@ -337,15 +384,27 @@ impl FriOps for MetalBackend {
         encoder.set_buffer(1, Some(&output_buffer), 0);
         encoder.set_buffer(2, Some(&lambda_buffer), 0);
         let half_size_u32 = half_size as u32;
-        encoder.set_bytes(3, std::mem::size_of::<u32>() as u64, &half_size_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<u32>() as u64,
+            &half_size_u32 as *const u32 as *const _,
+        );
 
         let num_threads = domain_size as u64;
         let threadgroup_size = 256.min(num_threads.max(1));
         let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
 
         encoder.dispatch_thread_groups(
-            metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-            metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+            metal::MTLSize {
+                width: threadgroups,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: threadgroup_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         // Unpack QM31 output to coordinates

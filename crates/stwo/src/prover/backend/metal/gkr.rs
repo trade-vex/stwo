@@ -2,6 +2,9 @@
 
 use metal::MTLResourceOptions;
 
+use super::context::MetalContext;
+use super::thresholds::MIN_MLE_LOG_SIZE;
+use super::MetalBackend;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::prover::backend::simd::SimdBackend;
@@ -10,13 +13,12 @@ use crate::prover::lookups::gkr_prover::{GkrMultivariatePolyOracle, GkrOps, Laye
 use crate::prover::lookups::mle::{Mle, MleOps};
 use crate::prover::lookups::utils::UnivariatePoly;
 
-use super::context::MetalContext;
-use super::thresholds::MIN_MLE_LOG_SIZE;
-use super::MetalBackend;
-
 // MleOps implementations are required for GkrOps
 impl MleOps<BaseField> for MetalBackend {
-    fn fix_first_variable(mle: Mle<Self, BaseField>, assignment: SecureField) -> Mle<Self, SecureField> {
+    fn fix_first_variable(
+        mle: Mle<Self, BaseField>,
+        assignment: SecureField,
+    ) -> Mle<Self, SecureField> {
         let log_size = mle.len().ilog2();
 
         // Fall back to SIMD for small sizes
@@ -51,7 +53,8 @@ impl MleOps<BaseField> for MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        // Allocate output buffer directly (GPU will write all values, no need to zero-initialize on CPU)
+        // Allocate output buffer directly (GPU will write all values, no need to zero-initialize on
+        // CPU)
         let output_size = (output_len * 4 * std::mem::size_of::<u32>()) as u64;
         let output_pooled = ctx.checkout_shared_buffer(output_size);
         let output_buffer = output_pooled.buffer();
@@ -71,15 +74,27 @@ impl MleOps<BaseField> for MetalBackend {
         encoder.set_buffer(0, Some(&input_buffer), 0);
         encoder.set_buffer(1, Some(&output_buffer), 0);
         encoder.set_buffer(2, Some(&assignment_buffer), 0);
-        encoder.set_bytes(3, std::mem::size_of::<u32>() as u64, &log_size as *const u32 as *const _);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<u32>() as u64,
+            &log_size as *const u32 as *const _,
+        );
 
         let num_threads = output_len as u64;
         let threadgroup_size = 256.min(num_threads.max(1));
         let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
 
         encoder.dispatch_thread_groups(
-            metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-            metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+            metal::MTLSize {
+                width: threadgroups,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: threadgroup_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         encoder.end_encoding();
@@ -88,10 +103,7 @@ impl MleOps<BaseField> for MetalBackend {
 
         // Read back results (QM31 format)
         let output_data = unsafe {
-            std::slice::from_raw_parts(
-                output_buffer.contents() as *const u32,
-                output_len * 4,
-            )
+            std::slice::from_raw_parts(output_buffer.contents() as *const u32, output_len * 4)
         };
 
         // Convert QM31 buffer to Vec<SecureField>
@@ -110,7 +122,10 @@ impl MleOps<BaseField> for MetalBackend {
 }
 
 impl MleOps<SecureField> for MetalBackend {
-    fn fix_first_variable(mle: Mle<Self, SecureField>, assignment: SecureField) -> Mle<Self, SecureField> {
+    fn fix_first_variable(
+        mle: Mle<Self, SecureField>,
+        assignment: SecureField,
+    ) -> Mle<Self, SecureField> {
         let log_size = mle.len().ilog2();
 
         // Fall back to SIMD for small sizes
@@ -154,7 +169,8 @@ impl MleOps<SecureField> for MetalBackend {
             MTLResourceOptions::StorageModeShared,
         );
 
-        // Allocate output buffer directly (GPU will write all values, no need to zero-initialize on CPU)
+        // Allocate output buffer directly (GPU will write all values, no need to zero-initialize on
+        // CPU)
         let output_size = (output_len * 4 * std::mem::size_of::<u32>()) as u64;
         let output_pooled = ctx.checkout_shared_buffer(output_size);
         let output_buffer = output_pooled.buffer();
@@ -174,15 +190,27 @@ impl MleOps<SecureField> for MetalBackend {
         encoder.set_buffer(0, Some(&input_buffer), 0);
         encoder.set_buffer(1, Some(&output_buffer), 0);
         encoder.set_buffer(2, Some(&assignment_buffer), 0);
-        encoder.set_bytes(3, std::mem::size_of::<u32>() as u64, &log_size as *const u32 as *const _);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<u32>() as u64,
+            &log_size as *const u32 as *const _,
+        );
 
         let num_threads = output_len as u64;
         let threadgroup_size = 256.min(num_threads.max(1));
         let threadgroups = (num_threads + threadgroup_size - 1) / threadgroup_size;
 
         encoder.dispatch_thread_groups(
-            metal::MTLSize { width: threadgroups, height: 1, depth: 1 },
-            metal::MTLSize { width: threadgroup_size, height: 1, depth: 1 },
+            metal::MTLSize {
+                width: threadgroups,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: threadgroup_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         encoder.end_encoding();
@@ -191,10 +219,7 @@ impl MleOps<SecureField> for MetalBackend {
 
         // Read back results (QM31 format)
         let output_data = unsafe {
-            std::slice::from_raw_parts(
-                output_buffer.contents() as *const u32,
-                output_len * 4,
-            )
+            std::slice::from_raw_parts(output_buffer.contents() as *const u32, output_len * 4)
         };
 
         // Convert QM31 buffer to Vec<SecureField>
@@ -238,7 +263,10 @@ impl GkrOps for MetalBackend {
                 let metal_col = mle.into_evals().into_iter().collect();
                 Layer::GrandProduct(Mle::new(metal_col))
             }
-            Layer::LogUpGeneric { numerators, denominators } => {
+            Layer::LogUpGeneric {
+                numerators,
+                denominators,
+            } => {
                 let metal_num = numerators.into_evals().into_iter().collect();
                 let metal_den = denominators.into_evals().into_iter().collect();
                 Layer::LogUpGeneric {
@@ -246,7 +274,10 @@ impl GkrOps for MetalBackend {
                     denominators: Mle::new(metal_den),
                 }
             }
-            Layer::LogUpMultiplicities { numerators, denominators } => {
+            Layer::LogUpMultiplicities {
+                numerators,
+                denominators,
+            } => {
                 let metal_num = numerators.into_evals().into_iter().collect();
                 let metal_den = denominators.into_evals().into_iter().collect();
                 Layer::LogUpMultiplicities {

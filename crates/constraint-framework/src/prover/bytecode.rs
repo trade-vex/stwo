@@ -37,7 +37,6 @@
 /// M31_TO_QM31                // Convert to QM31          -> qm31_stack: [result_qm31]
 /// ADD_CONSTRAINT             // Submit constraint
 /// ```
-
 use std_shims::{vec, Vec};
 
 /// Bytecode instruction opcodes.
@@ -182,11 +181,22 @@ pub enum Opcode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // M31 Stack Ops
-    LoadTraceM31 { interaction: u8, col_idx: u16, offset: i16 },
-    LoadConstM31 { value: u32 },
-    DupM31 { depth: u8 },
+    LoadTraceM31 {
+        interaction: u8,
+        col_idx: u16,
+        offset: i16,
+    },
+    LoadConstM31 {
+        value: u32,
+    },
+    DupM31 {
+        depth: u8,
+    },
     PopM31,
-    SwapM31 { depth1: u8, depth2: u8 },
+    SwapM31 {
+        depth1: u8,
+        depth2: u8,
+    },
 
     // M31 Arithmetic
     AddM31,
@@ -197,12 +207,25 @@ pub enum Instruction {
     InvM31,
 
     // QM31 Stack Ops
-    LoadTraceQM31 { interaction: u8, col_idx: u16, offset: i16 },
-    LoadConstQM31 { values: [u32; 4] },
-    DupQM31 { depth: u8 },
+    LoadTraceQM31 {
+        interaction: u8,
+        col_idx: u16,
+        offset: i16,
+    },
+    LoadConstQM31 {
+        values: [u32; 4],
+    },
+    DupQM31 {
+        depth: u8,
+    },
     PopQM31,
-    SwapQM31 { depth1: u8, depth2: u8 },
-    LoadRandomCoeff { index: u16 },
+    SwapQM31 {
+        depth1: u8,
+        depth2: u8,
+    },
+    LoadRandomCoeff {
+        index: u16,
+    },
 
     // QM31 Arithmetic
     AddQM31,
@@ -220,11 +243,17 @@ pub enum Instruction {
 
     // Constraint Ops
     AddConstraint,
-    MarkIntermediate { is_extension: bool },
+    MarkIntermediate {
+        is_extension: bool,
+    },
 
     // Control Flow
-    JumpIfZero { offset: i16 },
-    Jump { offset: i16 },
+    JumpIfZero {
+        offset: i16,
+    },
+    Jump {
+        offset: i16,
+    },
 
     // Logup
     WriteLogupFrac,
@@ -262,7 +291,11 @@ impl BytecodeProgram {
     /// Encode an instruction to bytecode.
     pub fn encode(&mut self, instr: Instruction) {
         match instr {
-            Instruction::LoadTraceM31 { interaction, col_idx, offset } => {
+            Instruction::LoadTraceM31 {
+                interaction,
+                col_idx,
+                offset,
+            } => {
                 self.bytes.push(Opcode::LoadTraceM31 as u8);
                 self.bytes.push(interaction);
                 self.bytes.extend_from_slice(&col_idx.to_be_bytes());
@@ -293,7 +326,11 @@ impl BytecodeProgram {
             Instruction::SquareM31 => self.bytes.push(Opcode::SquareM31 as u8),
             Instruction::InvM31 => self.bytes.push(Opcode::InvM31 as u8),
 
-            Instruction::LoadTraceQM31 { interaction, col_idx, offset } => {
+            Instruction::LoadTraceQM31 {
+                interaction,
+                col_idx,
+                offset,
+            } => {
                 self.bytes.push(Opcode::LoadTraceQM31 as u8);
                 self.bytes.push(interaction);
                 self.bytes.extend_from_slice(&col_idx.to_be_bytes());

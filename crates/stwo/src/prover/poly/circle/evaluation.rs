@@ -9,9 +9,9 @@ use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::fields::ExtensionOf;
 use crate::core::poly::circle::CircleDomain;
-use crate::prover::backend::simd::SimdBackend;
 #[cfg(all(target_os = "macos", feature = "metal_prover"))]
 use crate::prover::backend::metal::MetalBackend;
+use crate::prover::backend::simd::SimdBackend;
 use crate::prover::backend::{Col, Column, ColumnOps, CpuBackend};
 use crate::prover::poly::twiddles::TwiddleTree;
 use crate::prover::poly::{BitReversedOrder, NaturalOrder};

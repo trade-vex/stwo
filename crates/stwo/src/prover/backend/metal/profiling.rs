@@ -69,9 +69,7 @@ macro_rules! metal_profile {
     ($name:expr, $metadata:expr, $backend:expr, $body:block) => {{
         let _timer = if $crate::prover::backend::metal::profiling::is_profiling_enabled() {
             Some($crate::prover::backend::metal::profiling::ScopedTimer::new(
-                $name,
-                $metadata,
-                $backend,
+                $name, $metadata, $backend,
             ))
         } else {
             None

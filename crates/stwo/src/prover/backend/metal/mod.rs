@@ -43,39 +43,37 @@
 //! See `crates/examples/examples/test_gpu_channel.rs` for a complete example.
 
 #[cfg(target_os = "macos")]
-mod context;
-#[cfg(target_os = "macos")]
-mod column;
-#[cfg(target_os = "macos")]
-mod shaders;
-#[cfg(target_os = "macos")]
-mod twiddle_manager;
-#[cfg(target_os = "macos")]
 mod buffer_pool;
 #[cfg(target_os = "macos")]
 mod channel;
 #[cfg(target_os = "macos")]
-pub mod profiling;
+mod column;
 #[cfg(target_os = "macos")]
 pub mod constraint_eval_gpu;
+#[cfg(target_os = "macos")]
+mod context;
+#[cfg(target_os = "macos")]
+pub mod profiling;
+#[cfg(target_os = "macos")]
+mod shaders;
+#[cfg(target_os = "macos")]
+mod twiddle_manager;
 
 // Export Metal context (actively used)
-#[cfg(target_os = "macos")]
-pub use context::{MetalContext, MetalContextHandle};
-
-// Export Metal column types (now actively used)
-#[cfg(target_os = "macos")]
-pub use column::{GpuSlice, MetalBaseColumn, MetalSecureColumn};
-
 // Export GPU channel types (for GPU-resident Fiat-Shamir state)
 #[cfg(target_os = "macos")]
 pub use channel::{
-    MetalBlake2sChannel, MetalBlake2sM31Channel,
-    MetalBlake2sMerkleChannel, MetalBlake2sM31MerkleChannel,
+    MetalBlake2sChannel, MetalBlake2sM31Channel, MetalBlake2sM31MerkleChannel,
+    MetalBlake2sMerkleChannel,
 };
-
+// Export Metal column types (now actively used)
+#[cfg(target_os = "macos")]
+pub use column::{GpuSlice, MetalBaseColumn, MetalSecureColumn};
+#[cfg(target_os = "macos")]
+pub use context::{MetalContext, MetalContextHandle};
 #[cfg(target_os = "macos")]
 use serde::{Deserialize, Serialize};
+
 #[cfg(target_os = "macos")]
 use crate::core::fields::m31::BaseField;
 #[cfg(target_os = "macos")]
@@ -114,19 +112,19 @@ pub mod thresholds {
 
 // Trait implementations
 #[cfg(target_os = "macos")]
-mod poly;
+mod accumulation;
 #[cfg(target_os = "macos")]
 mod fri;
 #[cfg(target_os = "macos")]
-mod quotients;
-#[cfg(target_os = "macos")]
-mod accumulation;
-#[cfg(target_os = "macos")]
 mod gkr;
+#[cfg(target_os = "macos")]
+mod grind;
 #[cfg(target_os = "macos")]
 mod merkle;
 #[cfg(target_os = "macos")]
-mod grind;
+mod poly;
+#[cfg(target_os = "macos")]
+mod quotients;
 
 /// Metal GPU-accelerated backend.
 ///

@@ -2,7 +2,6 @@
 ///
 /// This module implements a "recording evaluator" that captures constraint operations
 /// as bytecode instead of executing them. The bytecode can then be interpreted on the GPU.
-
 use std::marker::PhantomData;
 
 use stwo::core::fields::m31::BaseField;
@@ -10,15 +9,19 @@ use stwo::core::fields::qm31::SecureField;
 use stwo::core::Fraction;
 
 use super::bytecode::{BytecodeProgram, Instruction};
-use crate::{EvalAtRow, INTERACTION_TRACE_IDX, Batching};
 use crate::logup::LogupAtRow;
+use crate::{Batching, EvalAtRow, INTERACTION_TRACE_IDX};
 
 /// Expression tree node for M31 operations.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum M31Expr {
     /// Load from trace column.
-    LoadTrace { interaction: u8, col_idx: u16, offset: i16 },
+    LoadTrace {
+        interaction: u8,
+        col_idx: u16,
+        offset: i16,
+    },
     /// Constant value.
     Const(u32),
     /// Addition.
@@ -40,7 +43,11 @@ pub enum M31Expr {
 #[derive(Clone, Debug)]
 pub enum QM31Expr {
     /// Load from trace column (4 consecutive M31 columns).
-    LoadTrace { interaction: u8, col_idx: u16, offset: i16 },
+    LoadTrace {
+        interaction: u8,
+        col_idx: u16,
+        offset: i16,
+    },
     /// Constant value.
     Const([u32; 4]),
     /// Random coefficient.
@@ -145,7 +152,11 @@ impl BytecodeGenerator {
     /// Compile M31 expression to bytecode (leaves result on M31 stack).
     fn compile_m31_expr(&mut self, expr: &M31Expr, m31_depth: &mut usize, qm31_depth: &mut usize) {
         match expr {
-            M31Expr::LoadTrace { interaction, col_idx, offset } => {
+            M31Expr::LoadTrace {
+                interaction,
+                col_idx,
+                offset,
+            } => {
                 self.program.encode(Instruction::LoadTraceM31 {
                     interaction: *interaction,
                     col_idx: *col_idx,
@@ -155,7 +166,8 @@ impl BytecodeGenerator {
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
             }
             M31Expr::Const(value) => {
-                self.program.encode(Instruction::LoadConstM31 { value: *value });
+                self.program
+                    .encode(Instruction::LoadConstM31 { value: *value });
                 *m31_depth += 1;
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
             }
@@ -163,7 +175,7 @@ impl BytecodeGenerator {
                 self.compile_m31_expr(lhs, m31_depth, qm31_depth);
                 self.compile_m31_expr(rhs, m31_depth, qm31_depth);
                 self.program.encode(Instruction::AddM31);
-                *m31_depth -= 1;  // Pops 2, pushes 1
+                *m31_depth -= 1; // Pops 2, pushes 1
             }
             M31Expr::Sub(lhs, rhs) => {
                 self.compile_m31_expr(lhs, m31_depth, qm31_depth);
@@ -194,9 +206,18 @@ impl BytecodeGenerator {
     }
 
     /// Compile QM31 expression to bytecode (leaves result on QM31 stack).
-    fn compile_qm31_expr(&mut self, expr: &QM31Expr, m31_depth: &mut usize, qm31_depth: &mut usize) {
+    fn compile_qm31_expr(
+        &mut self,
+        expr: &QM31Expr,
+        m31_depth: &mut usize,
+        qm31_depth: &mut usize,
+    ) {
         match expr {
-            QM31Expr::LoadTrace { interaction, col_idx, offset } => {
+            QM31Expr::LoadTrace {
+                interaction,
+                col_idx,
+                offset,
+            } => {
                 self.program.encode(Instruction::LoadTraceQM31 {
                     interaction: *interaction,
                     col_idx: *col_idx,
@@ -206,12 +227,14 @@ impl BytecodeGenerator {
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
             }
             QM31Expr::Const(values) => {
-                self.program.encode(Instruction::LoadConstQM31 { values: *values });
+                self.program
+                    .encode(Instruction::LoadConstQM31 { values: *values });
                 *qm31_depth += 1;
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
             }
             QM31Expr::RandomCoeff(index) => {
-                self.program.encode(Instruction::LoadRandomCoeff { index: *index });
+                self.program
+                    .encode(Instruction::LoadRandomCoeff { index: *index });
                 *qm31_depth += 1;
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
             }
@@ -277,7 +300,8 @@ impl BytecodeGenerator {
             }
             QM31Expr::MulSecureField(inner, values) => {
                 self.compile_qm31_expr(inner, m31_depth, qm31_depth);
-                self.program.encode(Instruction::LoadConstQM31 { values: *values });
+                self.program
+                    .encode(Instruction::LoadConstQM31 { values: *values });
                 *qm31_depth += 1;
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
                 self.program.encode(Instruction::MulQM31);
@@ -285,7 +309,8 @@ impl BytecodeGenerator {
             }
             QM31Expr::AddSecureField(inner, values) => {
                 self.compile_qm31_expr(inner, m31_depth, qm31_depth);
-                self.program.encode(Instruction::LoadConstQM31 { values: *values });
+                self.program
+                    .encode(Instruction::LoadConstQM31 { values: *values });
                 *qm31_depth += 1;
                 self.program.update_stack_depth(*m31_depth, *qm31_depth);
                 self.program.encode(Instruction::AddQM31);
@@ -307,14 +332,12 @@ impl EvalAtRow for BytecodeGenerator {
         let col_idx = self.column_index_per_interaction[interaction];
         self.column_index_per_interaction[interaction] += 1;
 
-        offsets.map(|offset| {
-            M31Handle {
-                expr: M31Expr::LoadTrace {
-                    interaction: interaction as u8,
-                    col_idx: col_idx as u16,
-                    offset: offset as i16,
-                },
-            }
+        offsets.map(|offset| M31Handle {
+            expr: M31Expr::LoadTrace {
+                interaction: interaction as u8,
+                col_idx: col_idx as u16,
+                offset: offset as i16,
+            },
         })
     }
 
@@ -442,7 +465,7 @@ impl num_traits::Zero for M31Handle {
     }
 
     fn is_zero(&self) -> bool {
-        false  // We don't track actual values, only expression trees
+        false // We don't track actual values, only expression trees
     }
 }
 
@@ -488,7 +511,12 @@ impl From<SecureField> for QM31Handle {
     fn from(value: SecureField) -> Self {
         let m31_array = value.to_m31_array();
         QM31Handle {
-            expr: QM31Expr::Const([m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0]),
+            expr: QM31Expr::Const([
+                m31_array[0].0,
+                m31_array[1].0,
+                m31_array[2].0,
+                m31_array[3].0,
+            ]),
         }
     }
 }
@@ -563,7 +591,12 @@ impl std::ops::Add<SecureField> for M31Handle {
         let m31_array = rhs.to_m31_array();
         QM31Handle {
             expr: QM31Expr::AddM31(
-                Box::new(QM31Expr::Const([m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0])),
+                Box::new(QM31Expr::Const([
+                    m31_array[0].0,
+                    m31_array[1].0,
+                    m31_array[2].0,
+                    m31_array[3].0,
+                ])),
                 Box::new(self.expr),
             ),
         }
@@ -577,7 +610,12 @@ impl std::ops::Add<SecureField> for QM31Handle {
         QM31Handle {
             expr: QM31Expr::AddSecureField(
                 Box::new(self.expr),
-                [m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0],
+                [
+                    m31_array[0].0,
+                    m31_array[1].0,
+                    m31_array[2].0,
+                    m31_array[3].0,
+                ],
             ),
         }
     }
@@ -605,7 +643,12 @@ impl std::ops::Mul<SecureField> for M31Handle {
         let m31_array = rhs.to_m31_array();
         QM31Handle {
             expr: QM31Expr::MulM31(
-                Box::new(QM31Expr::Const([m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0])),
+                Box::new(QM31Expr::Const([
+                    m31_array[0].0,
+                    m31_array[1].0,
+                    m31_array[2].0,
+                    m31_array[3].0,
+                ])),
                 Box::new(self.expr),
             ),
         }
@@ -619,7 +662,12 @@ impl std::ops::Mul<SecureField> for QM31Handle {
         QM31Handle {
             expr: QM31Expr::MulSecureField(
                 Box::new(self.expr),
-                [m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0],
+                [
+                    m31_array[0].0,
+                    m31_array[1].0,
+                    m31_array[2].0,
+                    m31_array[3].0,
+                ],
             ),
         }
     }

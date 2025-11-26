@@ -159,7 +159,7 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
             trace_locations,
             info,
             preprocessed_column_indices,
-            claimed_sum
+            claimed_sum,
         };
 
         #[cfg(all(target_os = "macos", feature = "metal_prover"))]
@@ -205,11 +205,8 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
         use crate::prover::bytecode_generator::BytecodeGenerator;
 
         let n_interactions = self.info.mask_offsets.len();
-        let mut generator = BytecodeGenerator::new(
-            n_interactions,
-            self.eval.log_size(),
-            self.claimed_sum,
-        );
+        let mut generator =
+            BytecodeGenerator::new(n_interactions, self.eval.log_size(), self.claimed_sum);
 
         generator = self.eval.evaluate(generator);
         generator.compile();

@@ -261,8 +261,10 @@ impl PolyOps for SimdBackend {
         #[cfg(test)]
         if poly.log_size() == 9 {
             let coeffs_cpu = poly.coeffs.to_cpu();
-            println!("\n[SIMD evaluate()] poly coeffs (first 16): {:?}",
-                     &coeffs_cpu[..16].iter().map(|f| f.0).collect::<Vec<_>>());
+            println!(
+                "\n[SIMD evaluate()] poly coeffs (first 16): {:?}",
+                &coeffs_cpu[..16].iter().map(|f| f.0).collect::<Vec<_>>()
+            );
         }
 
         let _span = span!(Level::TRACE, "", class = "rFFT").entered();

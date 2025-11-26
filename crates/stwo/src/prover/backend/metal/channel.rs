@@ -2,18 +2,17 @@
 //!
 //! This module provides MetalBlake2sChannel which keeps the Fiat-Shamir
 //! channel state (digest) on the GPU.
-//!
+
+use std::iter;
+use std::sync::Arc;
 
 use metal::{Buffer, MTLResourceOptions};
-use std::sync::Arc;
-use std::iter;
 
+use super::context::MetalContext;
 use crate::core::channel::{Blake2sChannelGeneric, Channel};
 use crate::core::fields::m31::{BaseField, P};
 use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
 use crate::core::vcs::blake2_hash::{Blake2sHash, Blake2sHasherGeneric};
-
-use super::context::MetalContext;
 
 /// Constants from blake2s module
 const BLAKE_BYTES_PER_HASH: usize = 32;
@@ -38,10 +37,9 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         let context = MetalContext::global();
 
         // Create GPU digest buffer (8 u32s = 32 bytes)
-        let digest_buffer = context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let digest_buffer = context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Initialize digest to zero (matches CPU channel default)
         {
@@ -98,10 +96,10 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
             None
         };
         // Create temporary buffer for root hash
-        let root_buffer = self.context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let root_buffer = self
+            .context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Copy root hash to GPU buffer
         {
@@ -115,10 +113,10 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         }
 
         // Create output buffer for new digest
-        let new_digest_buffer = self.context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let new_digest_buffer = self
+            .context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Dispatch GPU kernel
         let command_buffer = self.context.command_queue().new_command_buffer();
@@ -135,10 +133,7 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         encoder.set_buffer(3, Some(&new_digest_buffer), 0);
 
         // Single thread execution (channel ops are serial)
-        encoder.dispatch_thread_groups(
-            metal::MTLSize::new(1, 1, 1),
-            metal::MTLSize::new(1, 1, 1),
-        );
+        encoder.dispatch_thread_groups(metal::MTLSize::new(1, 1, 1), metal::MTLSize::new(1, 1, 1));
         encoder.end_encoding();
         command_buffer.commit();
         command_buffer.wait_until_completed();
@@ -160,10 +155,10 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
             None
         };
         // Create output buffer
-        let output_buffer = self.context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let output_buffer = self
+            .context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Dispatch GPU kernel
         let command_buffer = self.context.command_queue().new_command_buffer();
@@ -190,10 +185,7 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         encoder.set_buffer(4, Some(&output_buffer), 0);
 
         // Single thread execution
-        encoder.dispatch_thread_groups(
-            metal::MTLSize::new(1, 1, 1),
-            metal::MTLSize::new(1, 1, 1),
-        );
+        encoder.dispatch_thread_groups(metal::MTLSize::new(1, 1, 1), metal::MTLSize::new(1, 1, 1));
         encoder.end_encoding();
         command_buffer.commit();
         command_buffer.wait_until_completed();
@@ -246,7 +238,12 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
             .iter()
             .flat_map(|qm31| {
                 let m31_array = qm31.to_m31_array();
-                [m31_array[0].0, m31_array[1].0, m31_array[2].0, m31_array[3].0]
+                [
+                    m31_array[0].0,
+                    m31_array[1].0,
+                    m31_array[2].0,
+                    m31_array[3].0,
+                ]
             })
             .collect();
 
@@ -258,10 +255,10 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         );
 
         // Create output buffer for new digest
-        let new_digest_buffer = self.context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let new_digest_buffer = self
+            .context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Dispatch GPU kernel
         let command_buffer = self.context.command_queue().new_command_buffer();
@@ -284,10 +281,7 @@ impl<const IS_M31_OUTPUT: bool> MetalBlake2sChannelGeneric<IS_M31_OUTPUT> {
         encoder.set_buffer(4, Some(&new_digest_buffer), 0);
 
         // Single thread execution (channel ops are serial)
-        encoder.dispatch_thread_groups(
-            metal::MTLSize::new(1, 1, 1),
-            metal::MTLSize::new(1, 1, 1),
-        );
+        encoder.dispatch_thread_groups(metal::MTLSize::new(1, 1, 1), metal::MTLSize::new(1, 1, 1));
         encoder.end_encoding();
         command_buffer.commit();
         command_buffer.wait_until_completed();
@@ -334,10 +328,9 @@ impl<const IS_M31_OUTPUT: bool> Clone for MetalBlake2sChannelGeneric<IS_M31_OUTP
         let context = self.context.clone();
 
         // Create new digest buffer
-        let digest_buffer = context.device().new_buffer(
-            32,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let digest_buffer = context
+            .device()
+            .new_buffer(32, MTLResourceOptions::StorageModeShared);
 
         // Copy digest content
         {
@@ -446,7 +439,7 @@ pub type MetalBlake2sChannel = MetalBlake2sChannelGeneric<false>;
 pub type MetalBlake2sM31Channel = MetalBlake2sChannelGeneric<true>;
 
 use crate::core::channel::MerkleChannel;
-use crate::core::vcs::blake2_merkle::{Blake2sMerkleHasherGeneric};
+use crate::core::vcs::blake2_merkle::Blake2sMerkleHasherGeneric;
 use crate::core::vcs::MerkleHasher;
 
 /// GPU-accelerated Merkle channel using Metal compute kernels.

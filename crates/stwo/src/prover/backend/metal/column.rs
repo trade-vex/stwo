@@ -4,14 +4,15 @@
 //! access on Apple Silicon - the same memory is accessible by both CPU and GPU
 //! without explicit copies.
 
-use metal::{Buffer, MTLResourceOptions};
 use std::fmt::Debug;
+
+use metal::{Buffer, MTLResourceOptions};
 
 use super::context::MetalContext;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
-use crate::prover::backend::{Column, CpuBackend};
 use crate::prover::backend::simd::SimdBackend;
+use crate::prover::backend::{Column, CpuBackend};
 use crate::prover::secure_column::SecureColumnByCoords;
 
 /// A view into a GPU buffer representing a subrange without copying.
@@ -37,25 +38,19 @@ impl GpuSlice {
 
     /// Get a raw pointer to the data as u32 elements
     pub fn as_u32_ptr(&self) -> (*mut u32, usize) {
-        let ptr = unsafe {
-            (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize)
-        };
+        let ptr = unsafe { (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize) };
         (ptr as *mut u32, self.len_elems)
     }
 
     /// Get a raw pointer to the data as BaseField elements
     pub fn as_basefield_ptr(&self) -> (*mut BaseField, usize) {
-        let ptr = unsafe {
-            (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize)
-        };
+        let ptr = unsafe { (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize) };
         (ptr as *mut BaseField, self.len_elems)
     }
 
     /// Get a raw pointer to the data as SecureField elements
     pub fn as_securefield_ptr(&self) -> (*mut SecureField, usize) {
-        let ptr = unsafe {
-            (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize)
-        };
+        let ptr = unsafe { (self.buffer.contents() as *mut u8).add(self.offset_bytes as usize) };
         (ptr as *mut SecureField, self.len_elems)
     }
 }
@@ -111,10 +106,9 @@ impl Column<BaseField> for MetalBaseColumn {
     fn zeros(len: usize) -> Self {
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<BaseField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         // Zero the buffer
         let ptr = buffer.contents() as *mut BaseField;
@@ -128,10 +122,9 @@ impl Column<BaseField> for MetalBaseColumn {
     unsafe fn uninitialized(len: usize) -> Self {
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<BaseField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         Self::from_buffer(buffer, len)
     }
@@ -191,10 +184,9 @@ impl FromIterator<BaseField> for MetalBaseColumn {
 
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<BaseField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         // Copy data to buffer
         unsafe {
@@ -257,10 +249,9 @@ impl Column<SecureField> for MetalSecureColumn {
     fn zeros(len: usize) -> Self {
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<SecureField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         // Zero the buffer
         let ptr = buffer.contents() as *mut SecureField;
@@ -274,10 +265,9 @@ impl Column<SecureField> for MetalSecureColumn {
     unsafe fn uninitialized(len: usize) -> Self {
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<SecureField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         Self::from_buffer(buffer, len)
     }
@@ -337,10 +327,9 @@ impl FromIterator<SecureField> for MetalSecureColumn {
 
         let ctx = MetalContext::global();
         let size = len * std::mem::size_of::<SecureField>();
-        let buffer = ctx.device().new_buffer(
-            size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = ctx
+            .device()
+            .new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
 
         // Copy data to buffer
         unsafe {
@@ -454,7 +443,13 @@ mod tests {
         // Check that zeros are actually zero by converting to u32
         let val0 = col.at(0);
         let val49 = col.at(49);
-        assert_eq!(val0, SecureField::from_m31(M31::from(0), M31::from(0), M31::from(0), M31::from(0)));
-        assert_eq!(val49, SecureField::from_m31(M31::from(0), M31::from(0), M31::from(0), M31::from(0)));
+        assert_eq!(
+            val0,
+            SecureField::from_m31(M31::from(0), M31::from(0), M31::from(0), M31::from(0))
+        );
+        assert_eq!(
+            val49,
+            SecureField::from_m31(M31::from(0), M31::from(0), M31::from(0), M31::from(0))
+        );
     }
 }

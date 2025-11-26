@@ -1,5 +1,10 @@
 //! Metal quotient operations.
 
+use metal::MTLResourceOptions;
+
+use super::context::MetalContext;
+use super::thresholds::MIN_QUOTIENT_LOG_SIZE;
+use super::MetalBackend;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::pcs::quotients::{column_line_coeffs, ColumnSampleBatch};
@@ -10,11 +15,6 @@ use crate::prover::poly::circle::{CircleEvaluation, SecureEvaluation};
 use crate::prover::poly::BitReversedOrder;
 use crate::prover::secure_column::SecureColumnByCoords;
 use crate::prover::QuotientOps;
-use metal::MTLResourceOptions;
-
-use super::context::MetalContext;
-use super::thresholds::MIN_QUOTIENT_LOG_SIZE;
-use super::MetalBackend;
 
 impl QuotientOps for MetalBackend {
     fn accumulate_quotients(
@@ -24,14 +24,21 @@ impl QuotientOps for MetalBackend {
         sample_batches: &[ColumnSampleBatch],
         _log_blowup_factor: u32,
     ) -> SecureEvaluation<Self, BitReversedOrder> {
-        let _timer = crate::metal_profile_fn!("quotient", "GPU", log_size = domain.log_size(), num_columns = columns.len());
+        let _timer = crate::metal_profile_fn!(
+            "quotient",
+            "GPU",
+            log_size = domain.log_size(),
+            num_columns = columns.len()
+        );
 
         // Fall back to SIMD for small domains
         if domain.log_size() < MIN_QUOTIENT_LOG_SIZE || !MetalContext::is_available() {
             use crate::prover::backend::simd::column::BaseColumn;
 
             // Convert Metal columns to SIMD
-            let simd_columns_owned: Vec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> = columns
+            let simd_columns_owned: Vec<
+                CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>,
+            > = columns
                 .iter()
                 .map(|col| {
                     let cpu_vals = col.values.to_cpu();
@@ -39,8 +46,9 @@ impl QuotientOps for MetalBackend {
                     CircleEvaluation::new(col.domain, simd_col)
                 })
                 .collect();
-            let simd_columns_refs: Vec<&CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> =
-                simd_columns_owned.iter().collect();
+            let simd_columns_refs: Vec<
+                &CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>,
+            > = simd_columns_owned.iter().collect();
 
             let simd_result = SimdBackend::accumulate_quotients(
                 domain,
@@ -92,20 +100,20 @@ impl QuotientOps for MetalBackend {
                 // Store (a, b, c) as QM31 values (4 components each)
                 // QM31(CM31, CM31) and CM31(M31, M31) - both tuple structs
                 // Access pattern: QM31.0 or .1 -> CM31.0 or .1 -> M31.0 -> u32
-                line_coeffs_flat.push(a.0.0.0); // a.0.0 (first CM31's first M31)
-                line_coeffs_flat.push(a.0.1.0); // a.0.1 (first CM31's second M31)
-                line_coeffs_flat.push(a.1.0.0); // a.1.0 (second CM31's first M31)
-                line_coeffs_flat.push(a.1.1.0); // a.1.1 (second CM31's second M31)
+                line_coeffs_flat.push(a.0 .0 .0); // a.0.0 (first CM31's first M31)
+                line_coeffs_flat.push(a.0 .1 .0); // a.0.1 (first CM31's second M31)
+                line_coeffs_flat.push(a.1 .0 .0); // a.1.0 (second CM31's first M31)
+                line_coeffs_flat.push(a.1 .1 .0); // a.1.1 (second CM31's second M31)
 
-                line_coeffs_flat.push(b.0.0.0); // b.0.0
-                line_coeffs_flat.push(b.0.1.0); // b.0.1
-                line_coeffs_flat.push(b.1.0.0); // b.1.0
-                line_coeffs_flat.push(b.1.1.0); // b.1.1
+                line_coeffs_flat.push(b.0 .0 .0); // b.0.0
+                line_coeffs_flat.push(b.0 .1 .0); // b.0.1
+                line_coeffs_flat.push(b.1 .0 .0); // b.1.0
+                line_coeffs_flat.push(b.1 .1 .0); // b.1.1
 
-                line_coeffs_flat.push(c.0.0.0); // c.0.0
-                line_coeffs_flat.push(c.0.1.0); // c.0.1
-                line_coeffs_flat.push(c.1.0.0); // c.1.0
-                line_coeffs_flat.push(c.1.1.0); // c.1.1
+                line_coeffs_flat.push(c.0 .0 .0); // c.0.0
+                line_coeffs_flat.push(c.0 .1 .0); // c.0.1
+                line_coeffs_flat.push(c.1 .0 .0); // c.1.0
+                line_coeffs_flat.push(c.1 .1 .0); // c.1.1
             }
         }
 
@@ -115,15 +123,15 @@ impl QuotientOps for MetalBackend {
         for batch in sample_batches {
             // sample_batch.point is CirclePoint<SecureField>
             // SecureField = QM31(CM31, CM31), CM31(M31, M31)
-            sample_points_x.push(batch.point.x.0.0.0); // x.0.0
-            sample_points_x.push(batch.point.x.0.1.0); // x.0.1
-            sample_points_x.push(batch.point.x.1.0.0); // x.1.0
-            sample_points_x.push(batch.point.x.1.1.0); // x.1.1
+            sample_points_x.push(batch.point.x.0 .0 .0); // x.0.0
+            sample_points_x.push(batch.point.x.0 .1 .0); // x.0.1
+            sample_points_x.push(batch.point.x.1 .0 .0); // x.1.0
+            sample_points_x.push(batch.point.x.1 .1 .0); // x.1.1
 
-            sample_points_y.push(batch.point.y.0.0.0); // y.0.0
-            sample_points_y.push(batch.point.y.0.1.0); // y.0.1
-            sample_points_y.push(batch.point.y.1.0.0); // y.1.0
-            sample_points_y.push(batch.point.y.1.1.0); // y.1.1
+            sample_points_y.push(batch.point.y.0 .0 .0); // y.0.0
+            sample_points_y.push(batch.point.y.0 .1 .0); // y.0.1
+            sample_points_y.push(batch.point.y.1 .0 .0); // y.1.0
+            sample_points_y.push(batch.point.y.1 .1 .0); // y.1.1
         }
 
         // Dispatch to Metal GPU
@@ -192,20 +200,33 @@ impl QuotientOps for MetalBackend {
         encoder.set_buffer(1, Some(&domain_y_buffer), 0);
         encoder.set_buffer(2, Some(&columns_buffer), 0);
         let num_columns_u32 = num_columns as u32;
-        encoder.set_bytes(3, std::mem::size_of::<u32>() as u64, &num_columns_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            3,
+            std::mem::size_of::<u32>() as u64,
+            &num_columns_u32 as *const u32 as *const _,
+        );
         let domain_size_u32 = domain_size as u32;
-        encoder.set_bytes(4, std::mem::size_of::<u32>() as u64, &domain_size_u32 as *const u32 as *const _);
+        encoder.set_bytes(
+            4,
+            std::mem::size_of::<u32>() as u64,
+            &domain_size_u32 as *const u32 as *const _,
+        );
         encoder.set_buffer(5, Some(&column_indices_buffer), 0);
         encoder.set_buffer(6, Some(&line_coeffs_buffer), 0);
         encoder.set_buffer(7, Some(&sample_x_buffer), 0);
         encoder.set_buffer(8, Some(&sample_y_buffer), 0);
         encoder.set_buffer(9, Some(&batch_sizes_buffer), 0);
         let num_batches = sample_batches.len() as u32;
-        encoder.set_bytes(10, std::mem::size_of::<u32>() as u64, &num_batches as *const u32 as *const _);
+        encoder.set_bytes(
+            10,
+            std::mem::size_of::<u32>() as u64,
+            &num_batches as *const u32 as *const _,
+        );
         encoder.set_buffer(11, Some(&output_buffer), 0);
 
         let threadgroup_size = 256u64.min(domain_size as u64);
-        let num_threadgroups = ((domain_size as u64 + threadgroup_size - 1) / threadgroup_size).max(1);
+        let num_threadgroups =
+            ((domain_size as u64 + threadgroup_size - 1) / threadgroup_size).max(1);
 
         encoder.dispatch_thread_groups(
             metal::MTLSize::new(num_threadgroups, 1, 1),
@@ -218,7 +239,10 @@ impl QuotientOps for MetalBackend {
         let _gpu_timer = std::time::Instant::now();
         command_buffer.wait_until_completed();
         if std::env::var("METAL_PROFILE").is_ok() {
-            eprintln!("[CPU_PROFILE] quotient_gpu_wait | time={:.3}ms", _gpu_timer.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[CPU_PROFILE] quotient_gpu_wait | time={:.3}ms",
+                _gpu_timer.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         // Convert output buffer to SecureColumnByCoords
