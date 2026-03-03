@@ -9,6 +9,8 @@ use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::fields::ExtensionOf;
 use crate::core::poly::circle::{CanonicCoset, CircleDomain, MIN_CIRCLE_DOMAIN_LOG_SIZE};
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+use crate::prover::backend::metal::MetalBackend;
 use crate::prover::backend::simd::SimdBackend;
 use crate::prover::backend::{Col, Column, ColumnOps, CpuBackend};
 use crate::prover::poly::twiddles::TwiddleTree;
@@ -134,6 +136,16 @@ impl<B: ColumnOps<F>, F: ExtensionOf<BaseField>> CircleEvaluation<B, F, BitRever
 impl<F: ExtensionOf<BaseField>, EvalOrder> CircleEvaluation<SimdBackend, F, EvalOrder>
 where
     SimdBackend: ColumnOps<F>,
+{
+    pub fn to_cpu(&self) -> CircleEvaluation<CpuBackend, F, EvalOrder> {
+        CircleEvaluation::new(self.domain, self.values.to_cpu())
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+impl<F: ExtensionOf<BaseField>, EvalOrder> CircleEvaluation<MetalBackend, F, EvalOrder>
+where
+    MetalBackend: ColumnOps<F>,
 {
     pub fn to_cpu(&self) -> CircleEvaluation<CpuBackend, F, EvalOrder> {
         CircleEvaluation::new(self.domain, self.values.to_cpu())

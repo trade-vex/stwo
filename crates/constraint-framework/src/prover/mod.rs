@@ -1,4 +1,6 @@
 mod assert;
+pub mod bytecode;
+pub mod bytecode_generator;
 mod component_prover;
 mod cpu_domain;
 mod logup;

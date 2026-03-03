@@ -154,6 +154,7 @@ pub mod poseidon252 {
         /// `0 <= b < 2^GRIND_LOW_BITS`.
         fn grind(channel: &Poseidon252Channel, pow_bits: u32) -> u64 {
             let digest = channel.digest();
+            #[cfg_attr(not(feature = "parallel"), allow(unused_variables))]
             let prefixed_digest = poseidon_hash_many(&[
                 Poseidon252Channel::POW_PREFIX.into(),
                 digest,

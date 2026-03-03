@@ -23,6 +23,8 @@ std = [
 ]
 prover = ["std", "tracing/attributes"]
 parallel = ["rayon", "indexmap/rayon"]
+metal_prover = ["prover", "objc", "cocoa", "core-foundation", "metal"]
+metal_debug = ["metal_prover"]  # Enable validation and debug output
 slow-tests = []
 tracing = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -55,9 +57,18 @@ hashbrown.workspace = true
 stwo-std-shims = { version = "1.0.0", default-features = false }
 dashmap = "6.1.0"
 
+# Metal support (macOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = { version = "0.2", optional = true }
+cocoa = { version = "0.25", optional = true }
+core-foundation = { version = "0.9", optional = true }
+metal = { version = "0.27", optional = true }
+block = "0.1"
+
 [dev-dependencies]
 aligned = "0.4.2"
 test-log = { version = "0.2.15", features = ["trace"] }
+stwo-constraint-framework = { path = "../constraint-framework" }
 
 [package.metadata.cargo-machete]
 ignored = ["stwo-std-shims"]
@@ -142,3 +153,8 @@ required-features = ["prover"]
 harness = false
 name = "pcs"
 required-features = ["prover"]
+
+[[bench]]
+harness = false
+name = "metal_vs_simd"
+required-features = ["metal_prover"]

@@ -10,6 +10,7 @@ default = ["std"]
 std = ["stwo/std", "itertools/use_std", "tracing/std", "num-traits/std", "stwo-std-shims/std"]
 parallel = ["dep:rayon", "stwo/parallel"]
 prover = ["stwo/prover", "std"]
+metal_prover = ["stwo/metal_prover", "prover"]
 
 [dependencies]
 rayon = { workspace = true, optional = true }

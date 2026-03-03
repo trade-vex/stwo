@@ -9,6 +9,7 @@ description = "Example implementations using the STWO prover"
 parallel = ["dep:rayon", "stwo/parallel"]
 tracing = ["stwo/tracing"]
 slow-tests = []
+metal_prover = ["stwo/metal_prover", "stwo-constraint-framework/metal_prover"]
 
 [lib]
 bench = false
@@ -38,3 +39,7 @@ test-log = { version = "0.2.15", features = ["trace"] }
 [[bench]]
 harness = false
 name = "poseidon"
+
+[[bench]]
+harness = false
+name = "fibonacci_e2e_proof"

@@ -379,6 +379,15 @@ impl PolyOps for SimdBackend {
         domain: CircleDomain,
         twiddles: &TwiddleTree<Self>,
     ) -> CircleEvaluation<Self, BaseField, BitReversedOrder> {
+        #[cfg(test)]
+        if poly.log_size() == 9 {
+            let coeffs_cpu = poly.coeffs.to_cpu();
+            println!(
+                "\n[SIMD evaluate()] poly coeffs (first 16): {:?}",
+                &coeffs_cpu[..16].iter().map(|f| f.0).collect::<Vec<_>>()
+            );
+        }
+
         let _span = span!(Level::TRACE, "", class = "rFFT").entered();
         let log_size = domain.log_size();
         let fft_log_size = poly.log_size();

@@ -78,7 +78,7 @@ impl FriOps for SimdBackend {
             fold_circle_into_line_cpu(&mut cpu_dst, &src.to_cpu(), alpha);
             *dst = LineEvaluation::new(
                 cpu_dst.domain(),
-                SecureColumnByCoords::from_cpu(cpu_dst.values),
+                SecureColumnByCoords::<SimdBackend>::from_cpu(cpu_dst.values),
             );
             return;
         }
@@ -160,7 +160,7 @@ pub fn fold_circle_evaluation_into_line(
         fold_circle_into_line_cpu(&mut cpu_dst, &secure_evaluation, alpha);
         return LineEvaluation::new(
             cpu_dst.domain(),
-            SecureColumnByCoords::from_cpu(cpu_dst.values),
+            SecureColumnByCoords::<SimdBackend>::from_cpu(cpu_dst.values),
         );
     }
 

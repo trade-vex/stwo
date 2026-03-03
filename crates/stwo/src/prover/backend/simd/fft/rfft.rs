@@ -90,12 +90,32 @@ pub unsafe fn fft_lower_with_vecwise(
 
     assert_eq!(twiddle_dbl[0].len(), 1 << (log_size - 2));
 
+    #[cfg(test)]
+    if log_size == 9 {
+        println!(
+            "\n[SIMD fft_lower_with_vecwise] log_size={}, fft_layers={}, VECWISE_FFT_BITS={}",
+            log_size, fft_layers, VECWISE_FFT_BITS
+        );
+        println!(
+            "[SIMD] Will process non-vecwise layers: {}..{} (step_by 3, rev)",
+            VECWISE_FFT_BITS, fft_layers
+        );
+    }
+
     let src = UnsafeConst(src);
     let dst = UnsafeMut(dst);
     parallel_iter!(0..1 << (log_size - fft_layers)).for_each(|index_h| {
         let mut src = src.get();
         let dst = dst.get();
         for layer in (VECWISE_FFT_BITS..fft_layers).step_by(3).rev() {
+            #[cfg(test)]
+            if log_size == 9 && index_h == 0 {
+                println!(
+                    "[SIMD] Processing non-vecwise layer={}, remaining={}",
+                    layer,
+                    fft_layers - layer
+                );
+            }
             match fft_layers - layer {
                 1 => {
                     fft1_loop(src, dst, &twiddle_dbl[(layer - 1)..], layer, index_h);
@@ -116,6 +136,12 @@ pub unsafe fn fft_lower_with_vecwise(
             }
             src = dst;
         }
+
+        #[cfg(test)]
+        if log_size == 9 && index_h == 0 {
+            println!("[SIMD] Calling fft_vecwise_loop (processes vecwise layers 0-4)");
+        }
+
         fft_vecwise_loop(
             src,
             dst,
@@ -204,6 +230,16 @@ unsafe fn fft_vecwise_loop(
     loop_bits: usize,
     index_h: usize,
 ) {
+    #[cfg(test)]
+    if index_h == 0 && loop_bits == 4 {
+        println!(
+            "[SIMD fft_vecwise_loop] loop_bits={}, twiddle_dbl.len()={}",
+            loop_bits,
+            twiddle_dbl.len()
+        );
+        println!("[SIMD] Uses twiddle_dbl[3] for layer 3 (circle), then twiddle_dbl[0,1,2] for layers 0-2");
+    }
+
     for index_l in 0..1 << loop_bits {
         let index = (index_h << loop_bits) + index_l;
         let mut val0 = PackedBaseField::load(src.add(index * 32));
@@ -248,6 +284,36 @@ unsafe fn fft3_loop(
     layer: usize,
     index_h: usize,
 ) {
+    #[cfg(test)]
+    if layer == 5 && index_h == 0 {
+        println!(
+            "\n[SIMD fft3_loop] layer={}, twiddle_lens=[{}, {}, {}]",
+            layer,
+            twiddle_dbl[0].len(),
+            twiddle_dbl[1].len(),
+            twiddle_dbl[2].len()
+        );
+        println!(
+            "[SIMD] tw0[0..4]: {:?}",
+            &twiddle_dbl[0][..4.min(twiddle_dbl[0].len())]
+        );
+        println!(
+            "[SIMD] tw1[0..4]: {:?}",
+            &twiddle_dbl[1][..4.min(twiddle_dbl[1].len())]
+        );
+        println!(
+            "[SIMD] tw2[0..2]: {:?}",
+            &twiddle_dbl[2][..2.min(twiddle_dbl[2].len())]
+        );
+        println!(
+            "[SIMD] Input before fft3 (first 16 from src): {:?}",
+            std::slice::from_raw_parts(src, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
+    }
+
     for index_l in 0..1 << loop_bits {
         let index = (index_h << loop_bits) + index_l;
         let offset = index << (layer + 3);
@@ -268,6 +334,17 @@ unsafe fn fft3_loop(
                 }),
             );
         }
+    }
+
+    #[cfg(test)]
+    if layer == 5 && index_h == 0 {
+        println!(
+            "[SIMD] Output after fft3 (first 16 from dst): {:?}",
+            std::slice::from_raw_parts(dst, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -330,6 +407,22 @@ unsafe fn fft1_loop(
     layer: usize,
     index: usize,
 ) {
+    #[cfg(test)]
+    if layer == 8 && index == 0 {
+        println!(
+            "[SIMD fft1_loop] layer={}, twiddle_dbl[0].len()={}",
+            layer,
+            twiddle_dbl[0].len()
+        );
+        println!(
+            "[SIMD] Input (first 16 from src): {:?}",
+            std::slice::from_raw_parts(src, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
+        );
+    }
+
     let offset = index << (layer + 1);
     for l in (0..1 << layer).step_by(1 << LOG_N_LANES as usize) {
         fft1(
@@ -340,6 +433,17 @@ unsafe fn fft1_loop(
             array::from_fn(|i| {
                 *twiddle_dbl[0].get_unchecked((index + i) & (twiddle_dbl[0].len() - 1))
             }),
+        );
+    }
+
+    #[cfg(test)]
+    if layer == 8 && index == 0 {
+        println!(
+            "[SIMD] Output (first 16 from dst): {:?}",
+            std::slice::from_raw_parts(dst, 16)
+                .iter()
+                .map(|&x| x)
+                .collect::<Vec<_>>()
         );
     }
 }

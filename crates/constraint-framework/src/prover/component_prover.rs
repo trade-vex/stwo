@@ -10,6 +10,8 @@ use stwo::core::fields::qm31::SecureField;
 use stwo::core::pcs::TreeVec;
 use stwo::core::poly::circle::CanonicCoset;
 use stwo::core::utils::bit_reverse;
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+use stwo::prover::backend::metal::MetalBackend;
 use stwo::prover::backend::simd::column::VeryPackedSecureColumnByCoords;
 use stwo::prover::backend::simd::m31::LOG_N_LANES;
 use stwo::prover::backend::simd::very_packed_m31::{VeryPackedBaseField, LOG_N_VERY_PACKED_ELEMS};
@@ -102,7 +104,7 @@ impl<E: FrameworkEval + Sync> ComponentProver<SimdBackend> for FrameworkComponen
         if trace_domain.log_size() < LOG_N_LANES + LOG_N_VERY_PACKED_ELEMS {
             let trace_cols = trace.as_cols_ref().map_cols(|c| c.to_cpu());
             let trace_cols = trace_cols.as_cols_ref();
-            *accum.col = SecureColumnByCoords::from_cpu(accumulate_pointwise_cpu(
+            *accum.col = SecureColumnByCoords::<SimdBackend>::from_cpu(accumulate_pointwise_cpu(
                 self,
                 trace_cols,
                 eval_domain.log_size(),
@@ -193,8 +195,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<CpuBackend> for FrameworkComponent
             .collect();
 
         // Extend trace if necessary.
-        // TODO: Don't extend when eval_size < committed_size. Instead, pick a good
-        // subdomain. (For larger blowup factors).
         let need_to_extend = component_polys
             .iter()
             .flatten()
@@ -254,7 +254,6 @@ fn accumulate_pointwise_cpu<E: FrameworkEval>(
 ) -> SecureColumnByCoords<CpuBackend> {
     let mut res = SecureColumnByCoords::zeros(1 << eval_log_size);
     for row in 0..(1 << eval_log_size) {
-        // Evaluate constrains at row.
         let eval = CpuDomainEvaluator::new(
             &trace_cols,
             row,
@@ -266,9 +265,171 @@ fn accumulate_pointwise_cpu<E: FrameworkEval>(
         );
         let row_res = component.eval.evaluate(eval).row_res;
 
-        // Finalize row.
         let row_denom_inv = denom_inv[row >> trace_log_size];
         res.set(row, accum.at(row) + row_res * row_denom_inv)
     }
     res
+}
+
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+impl<E: FrameworkEval + Sync> ComponentProver<MetalBackend> for FrameworkComponent<E> {
+    fn evaluate_constraint_quotients_on_domain(
+        &self,
+        trace: &Trace<'_, MetalBackend>,
+        evaluation_accumulator: &mut DomainEvaluationAccumulator<MetalBackend>,
+    ) {
+        if self.n_constraints() == 0 {
+            return;
+        }
+
+        if self.is_disabled() {
+            evaluation_accumulator.skip_coeffs(self.n_constraints());
+            return;
+        }
+
+        let eval_domain = CanonicCoset::new(self.max_constraint_log_degree_bound()).circle_domain();
+        let trace_domain = CanonicCoset::new(self.eval.log_size());
+
+        let mut component_polys = trace.polys.sub_tree(&self.trace_locations);
+        component_polys[PREPROCESSED_TRACE_IDX] = self
+            .preprocessed_column_indices
+            .iter()
+            .map(|idx| &trace.polys[PREPROCESSED_TRACE_IDX][*idx])
+            .collect();
+
+        let need_to_extend = component_polys
+            .iter()
+            .flatten()
+            .any(|c| c.evals.domain.log_size() != eval_domain.log_size());
+        let trace: TreeVec<
+            Vec<Cow<'_, CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>>>,
+        > = if need_to_extend {
+            let _span = span!(Level::INFO, "Constraint Extension").entered();
+            let twiddles = MetalBackend::precompute_twiddles(eval_domain.half_coset);
+            component_polys
+                .as_cols_ref()
+                .map_cols(|col| Cow::Owned(col.get_evaluation_on_domain(eval_domain, &twiddles)))
+        } else {
+            component_polys.map_cols(|c| Cow::Borrowed(&c.evals))
+        };
+
+        // Denom inverses.
+        let log_expand = eval_domain.log_size() - trace_domain.log_size();
+        let mut denom_inv = (0..1 << log_expand)
+            .map(|i| coset_vanishing(trace_domain.coset(), eval_domain.at(i)).inverse())
+            .collect_vec();
+        bit_reverse(&mut denom_inv);
+
+        let [mut accum] =
+            evaluation_accumulator.columns([(eval_domain.log_size(), self.n_constraints())]);
+        accum.random_coeff_powers.reverse();
+
+        let _span = span!(
+            Level::INFO,
+            "Constraint point-wise eval",
+            class = "ConstraintEval"
+        )
+        .entered();
+
+        const MIN_GPU_CONSTRAINT_LOG_SIZE: u32 = 12;
+
+        if trace_domain.log_size() >= MIN_GPU_CONSTRAINT_LOG_SIZE {
+            if let Some(bytecode) = self.bytecode() {
+                use stwo::prover::backend::metal::constraint_eval_gpu;
+
+                let trace_refs = trace.as_cols_ref().map_cols(|c| c.as_ref());
+                let gpu_result = constraint_eval_gpu::evaluate_constraints_gpu(
+                    bytecode,
+                    &trace_refs,
+                    &accum.random_coeff_powers,
+                    &CanonicCoset::new(trace_domain.log_size()),
+                    eval_domain.log_size(),
+                );
+
+                *accum.col = gpu_result.output;
+                return;
+            }
+        }
+
+        if trace_domain.log_size() < LOG_N_LANES + LOG_N_VERY_PACKED_ELEMS {
+            let mut col = accum.col.to_cpu();
+            let trace_cols = trace.as_cols_ref().map_cols(|c| c.to_cpu());
+
+            for row in 0..(1 << eval_domain.log_size()) {
+                let trace_cols = trace_cols.as_cols_ref();
+                let eval = CpuDomainEvaluator::new(
+                    &trace_cols,
+                    row,
+                    &accum.random_coeff_powers,
+                    trace_domain.log_size(),
+                    eval_domain.log_size(),
+                    self.eval.log_size(),
+                    self.claimed_sum,
+                );
+                let row_res = self.eval.evaluate(eval).row_res;
+                let denom_inv = denom_inv[row >> trace_domain.log_size()];
+                col.set(row, col.at(row) + row_res * denom_inv)
+            }
+            let col = SecureColumnByCoords::<MetalBackend>::from_cpu(col);
+            *accum.col = col;
+            return;
+        }
+
+        let cpu_col = accum.col.to_cpu();
+        let mut simd_col = SecureColumnByCoords::<SimdBackend>::from_cpu(cpu_col);
+        let simd_trace = trace.as_cols_ref().map_cols(|c| {
+            let cpu_vals = c.to_cpu();
+            CircleEvaluation::<SimdBackend, BaseField, BitReversedOrder>::new(
+                c.domain,
+                cpu_vals.into_iter().collect(),
+            )
+        });
+
+        let col = unsafe { VeryPackedSecureColumnByCoords::transform_under_mut(&mut simd_col) };
+        let range = 0..(1 << (eval_domain.log_size() - LOG_N_LANES - LOG_N_VERY_PACKED_ELEMS));
+
+        #[cfg(not(feature = "parallel"))]
+        let iter = range.step_by(CHUNK_SIZE).zip(col.chunks_mut(CHUNK_SIZE));
+
+        #[cfg(feature = "parallel")]
+        let iter = range
+            .into_par_iter()
+            .step_by(CHUNK_SIZE)
+            .zip(col.chunks_mut(CHUNK_SIZE));
+
+        let self_eval = &self.eval;
+        let self_claimed_sum = self.claimed_sum;
+
+        iter.for_each(|(chunk_idx, mut chunk)| {
+            let trace_cols = simd_trace.as_cols_ref().map_cols(|c| c);
+
+            for idx_in_chunk in 0..CHUNK_SIZE {
+                let vec_row = chunk_idx * CHUNK_SIZE + idx_in_chunk;
+                let eval = SimdDomainEvaluator::new(
+                    &trace_cols,
+                    vec_row,
+                    &accum.random_coeff_powers,
+                    trace_domain.log_size(),
+                    eval_domain.log_size(),
+                    self_eval.log_size(),
+                    self_claimed_sum,
+                );
+                let row_res = self_eval.evaluate(eval).row_res;
+
+                unsafe {
+                    let denom_inv = VeryPackedBaseField::broadcast(
+                        denom_inv[vec_row
+                            >> (trace_domain.log_size() - LOG_N_LANES - LOG_N_VERY_PACKED_ELEMS)],
+                    );
+                    chunk.set_packed(
+                        idx_in_chunk,
+                        chunk.packed_at(idx_in_chunk) + row_res * denom_inv,
+                    )
+                }
+            }
+        });
+
+        let result_cpu = simd_col.to_cpu();
+        *accum.col = SecureColumnByCoords::<MetalBackend>::from_cpu(result_cpu);
+    }
 }

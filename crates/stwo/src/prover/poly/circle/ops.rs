@@ -62,6 +62,18 @@ pub trait PolyOps: ColumnOps<BaseField> + ColumnOps<SecureField> + Sized {
         weights: &Col<Self, SecureField>,
     ) -> SecureField;
 
+    /// Evaluates multiple polynomials at multiple points in a batched manner.
+    /// Default implementation calls `eval_at_point` for each (poly, point) pair.
+    /// Backends can override this for optimized batched evaluation (e.g., GPU).
+    fn eval_at_points_batched(
+        polys_and_points: &[(&CircleCoefficients<Self>, CirclePoint<SecureField>)],
+    ) -> Vec<SecureField> {
+        polys_and_points
+            .iter()
+            .map(|(poly, point)| Self::eval_at_point(poly, *point))
+            .collect()
+    }
+
     /// Evaluates a polynomial, represented by it's evaluations, at a point using folding.
     /// Used by the [`CircleEvaluation::eval_at_point_by_folding()`] function.
     fn eval_at_point_by_folding(

@@ -59,10 +59,11 @@ pub fn prove_ex<B: BackendForChannel<MC>, MC: MerkleChannel>(
         class = "CompositionPolynomialGeneration"
     )
     .entered();
+
     let composition_poly = component_provers.compute_composition_polynomial(random_coeff, &trace);
     span1.exit();
 
-    // Commit on the Composition Polynomial by splitting its coeffs to two polynomialsof degree
+    // Commit on the Composition Polynomial by splitting its coeffs to two polynomials of degree
     // half the size of the original polynomial, and commit on each half separately.
     let mut tree_builder = commitment_scheme.tree_builder();
     let (left_comp_poly_half, right_comp_poly_half) = composition_poly.split_at_mid();

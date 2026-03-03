@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 
 pub use cpu::CpuBackend;
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+pub use metal::MetalBackend;
 
 use crate::core::channel::MerkleChannel;
 use crate::core::fields::m31::BaseField;
@@ -13,6 +15,8 @@ use crate::prover::vcs_lifted::ops::MerkleOpsLifted;
 use crate::prover::{AccumulationOps, QuotientOps};
 
 pub mod cpu;
+#[cfg(all(target_os = "macos", feature = "metal_prover"))]
+pub mod metal;
 pub mod simd;
 
 pub trait Backend:

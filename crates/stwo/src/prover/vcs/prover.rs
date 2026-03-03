@@ -52,6 +52,7 @@ impl<B: MerkleOps<H>, H: MerkleHasher> MerkleProver<B, H> {
         let mut layers: Vec<Col<B, H::Hash>> = Vec::new();
 
         let max_log_size = columns.peek().unwrap().len().ilog2();
+
         for log_size in (0..=max_log_size).rev() {
             // Take columns of the current log_size.
             let layer_columns = columns
@@ -60,6 +61,7 @@ impl<B: MerkleOps<H>, H: MerkleHasher> MerkleProver<B, H> {
 
             layers.push(B::commit_on_layer(log_size, layers.last(), &layer_columns));
         }
+
         layers.reverse();
         Self { layers }
     }

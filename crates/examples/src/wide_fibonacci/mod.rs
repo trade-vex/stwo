@@ -309,24 +309,20 @@ mod tests {
         const N_COLS_SHORT_COMPONENT: usize = 5;
 
         let config = PcsConfig::default();
-        // Precompute twiddles.
         let twiddles = CpuBackend::precompute_twiddles(
             CanonicCoset::new(LOG_SIZE_LONG + config.fri_config.log_blowup_factor)
                 .circle_domain()
                 .half_coset,
         );
 
-        // Setup protocol.
         let prover_channel = &mut Blake2sM31Channel::default();
         let mut commitment_scheme =
             CommitmentSchemeProver::<CpuBackend, Blake2sM31MerkleChannel>::new(config, &twiddles);
         commitment_scheme.set_store_polynomials_coefficients();
-        // Preprocessed trace
         let mut tree_builder = commitment_scheme.tree_builder();
         tree_builder.extend_evals(vec![]);
         tree_builder.commit(prover_channel);
 
-        // Trace.
         let trace = [
             generate_trace::<N_COLS_LONG_COMPONENT, _>(&generate_test_inputs(LOG_SIZE_LONG)),
             generate_trace::<N_COLS_SHORT_COMPONENT, _>(&generate_test_inputs(LOG_SIZE_SHORT)),
@@ -337,7 +333,6 @@ mod tests {
         tree_builder.extend_evals(trace);
         tree_builder.commit(prover_channel);
 
-        // Generate components.
         let mut trace_alloc = TraceLocationAllocator::default();
         let component0 = WideFibonacciComponent::new(
             &mut trace_alloc,
@@ -354,7 +349,6 @@ mod tests {
             SecureField::zero(),
         );
 
-        // Prove.
         let proof = prove::<CpuBackend, Blake2sM31MerkleChannel>(
             &[&component0, &component1],
             prover_channel,
@@ -362,7 +356,6 @@ mod tests {
         )
         .unwrap();
 
-        // Verify.
         let verifier_channel = &mut Blake2sM31Channel::default();
         let commitment_scheme =
             &mut CommitmentSchemeVerifier::<Blake2sM31MerkleChannel>::new(config);
@@ -372,7 +365,6 @@ mod tests {
             vec![LOG_SIZE_SHORT; N_COLS_SHORT_COMPONENT],
         ]
         .concat();
-        // Retrieve the expected column sizes in each commitment interaction, from the AIR.
         let sizes = TreeVec::new(vec![vec![], trace_sizes]);
         commitment_scheme.commit(proof.commitments[0], &sizes[0], verifier_channel);
         commitment_scheme.commit(proof.commitments[1], &sizes[1], verifier_channel);
@@ -395,24 +387,20 @@ mod tests {
         const N_ROWS_SHORT_COMPONENT: usize = 5;
 
         let config = PcsConfig::default();
-        // Precompute twiddles.
         let twiddles = CpuBackend::precompute_twiddles(
             CanonicCoset::new(LOG_SIZE_LONG + config.fri_config.log_blowup_factor)
                 .circle_domain()
                 .half_coset,
         );
 
-        // Setup protocol.
         let prover_channel = &mut Blake2sM31Channel::default();
         let mut commitment_scheme =
             CommitmentSchemeProver::<CpuBackend, Blake2sM31MerkleChannel>::new(config, &twiddles);
         commitment_scheme.set_store_polynomials_coefficients();
-        // Preprocessed trace
         let mut tree_builder = commitment_scheme.tree_builder();
         tree_builder.extend_evals(vec![]);
         tree_builder.commit(prover_channel);
 
-        // Trace.
         let trace = [
             generate_trace::<N_ROWS_LONG_COMPONENT, _>(&generate_test_inputs(LOG_SIZE_LONG)),
             vec![CircleEvaluation::zero_padding(); N_ROWS_SHORT_COMPONENT],
@@ -423,7 +411,6 @@ mod tests {
         tree_builder.extend_evals(trace);
         tree_builder.commit(prover_channel);
 
-        // Generate components.
         let mut trace_alloc = TraceLocationAllocator::default();
         let component0 = WideFibonacciComponent::new(
             &mut trace_alloc,
@@ -439,7 +426,6 @@ mod tests {
             },
         );
 
-        // Prove.
         let proof = prove::<CpuBackend, Blake2sM31MerkleChannel>(
             &[&component0, &component1],
             prover_channel,
@@ -447,7 +433,6 @@ mod tests {
         )
         .unwrap();
 
-        // Verify.
         let verifier_channel = &mut Blake2sM31Channel::default();
         let commitment_scheme =
             &mut CommitmentSchemeVerifier::<Blake2sM31MerkleChannel>::new(config);
@@ -457,7 +442,6 @@ mod tests {
             vec![LOG_SIZE_SHORT; N_ROWS_SHORT_COMPONENT],
         ]
         .concat();
-        // Retrieve the expected column sizes in each commitment interaction, from the AIR.
         let sizes = TreeVec::new(vec![vec![], trace_sizes]);
         commitment_scheme.commit(proof.commitments[0], &sizes[0], verifier_channel);
         commitment_scheme.commit(proof.commitments[1], &sizes[1], verifier_channel);
@@ -469,5 +453,77 @@ mod tests {
             proof,
         )
         .is_ok());
+    }
+
+    #[test_log::test]
+    #[cfg(all(target_os = "macos", feature = "metal_prover"))]
+    fn test_wide_fib_prove_with_metal() {
+        use stwo::prover::backend::metal::MetalBackend;
+        use stwo::prover::backend::Col;
+        use stwo::prover::poly::BitReversedOrder;
+
+        for log_n_instances in 5..=7 {
+            let config = PcsConfig::default();
+            let twiddles = MetalBackend::precompute_twiddles(
+                CanonicCoset::new(log_n_instances + 1 + config.fri_config.log_blowup_factor)
+                    .circle_domain()
+                    .half_coset,
+            );
+
+            let prover_channel = &mut Blake2sM31Channel::default();
+            let mut commitment_scheme = CommitmentSchemeProver::<
+                MetalBackend,
+                Blake2sM31MerkleChannel,
+            >::new(config, &twiddles);
+
+            let mut tree_builder = commitment_scheme.tree_builder();
+            tree_builder.extend_evals(vec![]);
+            tree_builder.commit(prover_channel);
+
+            let simd_trace = generate_trace::<FIB_SEQUENCE_LENGTH, SimdBackend>(
+                &generate_test_inputs(log_n_instances),
+            );
+            let metal_trace: Vec<CircleEvaluation<MetalBackend, BaseField, BitReversedOrder>> =
+                simd_trace
+                    .iter()
+                    .map(|simd_eval| {
+                        let cpu_values = simd_eval.values.to_cpu();
+                        let metal_col: Col<MetalBackend, BaseField> =
+                            cpu_values.into_iter().collect();
+                        CircleEvaluation::<MetalBackend, _, BitReversedOrder>::new(
+                            simd_eval.domain,
+                            metal_col,
+                        )
+                    })
+                    .collect();
+
+            let mut tree_builder = commitment_scheme.tree_builder();
+            tree_builder.extend_evals(metal_trace);
+            tree_builder.commit(prover_channel);
+
+            let component = WideFibonacciComponent::new(
+                &mut TraceLocationAllocator::default(),
+                WideFibonacciEval::<FIB_SEQUENCE_LENGTH> {
+                    log_n_rows: log_n_instances,
+                },
+                SecureField::zero(),
+            );
+
+            let proof = prove::<MetalBackend, Blake2sM31MerkleChannel>(
+                &[&component],
+                prover_channel,
+                commitment_scheme,
+            )
+            .unwrap();
+
+            let verifier_channel = &mut Blake2sM31Channel::default();
+            let commitment_scheme =
+                &mut CommitmentSchemeVerifier::<Blake2sM31MerkleChannel>::new(config);
+
+            let sizes = component.trace_log_degree_bounds();
+            commitment_scheme.commit(proof.commitments[0], &sizes[0], verifier_channel);
+            commitment_scheme.commit(proof.commitments[1], &sizes[1], verifier_channel);
+            verify(&[&component], verifier_channel, commitment_scheme, proof).unwrap();
+        }
     }
 }
