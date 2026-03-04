@@ -79,14 +79,20 @@ pub struct MetalContext {
     /// FRI decompose sum reduction kernel (parallel sum for lambda computation).
     fri_decompose_sum_pipeline: ComputePipelineState,
 
-    /// Quotient accumulation kernel pipeline.
+    /// Quotient accumulation kernel pipeline (legacy one-pass, unused).
     quotient_pipeline: ComputePipelineState,
+
+    /// Quotient partial numerator kernel (accumulate_numerators step).
+    quotient_partial_numerator_pipeline: ComputePipelineState,
+
+    /// Quotient combine kernel (compute_quotients_and_combine step).
+    quotient_combine_pipeline: ComputePipelineState,
 
     /// Merkle BLAKE2s kernel pipeline.
     merkle_pipeline: ComputePipelineState,
 
-    /// Merkle BLAKE2s leaf hashing kernel pipeline.
-    merkle_leaf_pipeline: ComputePipelineState,
+    /// Merkle BLAKE2s leaf hashing with lifting (variable-size columns).
+    merkle_leaf_lifted_pipeline: ComputePipelineState,
 
     /// MLE fold M31→QM31 kernel pipeline (for lookups).
     mle_fold_m31_pipeline: ComputePipelineState,
@@ -132,6 +138,15 @@ pub struct MetalContext {
 
     /// GPU trace reshape batch kernel (multiple columns).
     trace_reshape_batch_pipeline: ComputePipelineState,
+
+    /// GPU bit reversal kernel for M31 columns.
+    bit_reverse_m31_pipeline: ComputePipelineState,
+
+    /// GPU bit reversal kernel for QM31 (SecureField) columns.
+    bit_reverse_qm31_pipeline: ComputePipelineState,
+
+    /// GPU batch inverse kernel for M31 elements (Montgomery's trick).
+    batch_inverse_m31_pipeline: ComputePipelineState,
 
     /// Cache for twiddle factor buffers.
     /// Key is a hash of the twiddle data, value is the Metal buffer.
@@ -193,8 +208,13 @@ impl MetalContext {
         let fri_decompose_sum_pipeline =
             Self::create_pipeline(&device, &library, "fri_decompose_sum")?;
         let quotient_pipeline = Self::create_pipeline(&device, &library, "quotient_accumulate")?;
+        let quotient_partial_numerator_pipeline =
+            Self::create_pipeline(&device, &library, "quotient_partial_numerator")?;
+        let quotient_combine_pipeline =
+            Self::create_pipeline(&device, &library, "quotient_combine")?;
         let merkle_pipeline = Self::create_pipeline(&device, &library, "merkle_blake2s")?;
-        let merkle_leaf_pipeline = Self::create_pipeline(&device, &library, "merkle_blake2s_leaf")?;
+        let merkle_leaf_lifted_pipeline =
+            Self::create_pipeline(&device, &library, "merkle_blake2s_leaf_lifted")?;
         let mle_fold_m31_pipeline =
             Self::create_pipeline(&device, &library, "mle_fold_m31_to_qm31")?;
         let mle_fold_qm31_pipeline =
@@ -223,6 +243,12 @@ impl MetalContext {
             Self::create_pipeline(&device, &library, "trace_reshape_column")?;
         let trace_reshape_batch_pipeline =
             Self::create_pipeline(&device, &library, "trace_reshape_batch")?;
+        let bit_reverse_m31_pipeline =
+            Self::create_pipeline(&device, &library, "bit_reverse_m31")?;
+        let bit_reverse_qm31_pipeline =
+            Self::create_pipeline(&device, &library, "bit_reverse_qm31")?;
+        let batch_inverse_m31_pipeline =
+            Self::create_pipeline(&device, &library, "batch_inverse_m31")?;
 
         let buffer_pools = GlobalPools::new(device.clone());
 
@@ -241,8 +267,10 @@ impl MetalContext {
             fri_decompose_pipeline,
             fri_decompose_sum_pipeline,
             quotient_pipeline,
+            quotient_partial_numerator_pipeline,
+            quotient_combine_pipeline,
             merkle_pipeline,
-            merkle_leaf_pipeline,
+            merkle_leaf_lifted_pipeline,
             mle_fold_m31_pipeline,
             mle_fold_qm31_pipeline,
             grind_pipeline,
@@ -258,6 +286,9 @@ impl MetalContext {
             constraint_eval_vm_pipeline,
             trace_reshape_column_pipeline,
             trace_reshape_batch_pipeline,
+            bit_reverse_m31_pipeline,
+            bit_reverse_qm31_pipeline,
+            batch_inverse_m31_pipeline,
             twiddle_cache: Mutex::new(HashMap::new()),
             flat_twiddle_manager: FlatTwiddleManager::new(),
             buffer_pools,
@@ -353,9 +384,19 @@ impl MetalContext {
         &self.fri_decompose_sum_pipeline
     }
 
-    /// Get quotient accumulation pipeline.
+    /// Get quotient accumulation pipeline (legacy one-pass).
     pub fn quotient_pipeline(&self) -> &ComputePipelineState {
         &self.quotient_pipeline
+    }
+
+    /// Get quotient partial numerator pipeline (accumulate_numerators step).
+    pub fn quotient_partial_numerator_pipeline(&self) -> &ComputePipelineState {
+        &self.quotient_partial_numerator_pipeline
+    }
+
+    /// Get quotient combine pipeline (compute_quotients_and_combine step).
+    pub fn quotient_combine_pipeline(&self) -> &ComputePipelineState {
+        &self.quotient_combine_pipeline
     }
 
     /// Get Merkle hashing pipeline.
@@ -363,9 +404,9 @@ impl MetalContext {
         &self.merkle_pipeline
     }
 
-    /// Get Merkle leaf hashing pipeline.
-    pub fn merkle_leaf_pipeline(&self) -> &ComputePipelineState {
-        &self.merkle_leaf_pipeline
+    /// Get Merkle leaf hashing with lifting pipeline (variable-size columns).
+    pub fn merkle_leaf_lifted_pipeline(&self) -> &ComputePipelineState {
+        &self.merkle_leaf_lifted_pipeline
     }
 
     /// Get MLE fold M31→QM31 pipeline.
@@ -441,6 +482,21 @@ impl MetalContext {
     /// Get GPU trace reshape batch pipeline (multiple columns).
     pub fn trace_reshape_batch_pipeline(&self) -> &ComputePipelineState {
         &self.trace_reshape_batch_pipeline
+    }
+
+    /// Get GPU bit reversal pipeline for M31 columns.
+    pub fn bit_reverse_m31_pipeline(&self) -> &ComputePipelineState {
+        &self.bit_reverse_m31_pipeline
+    }
+
+    /// Get GPU bit reversal pipeline for QM31 (SecureField) columns.
+    pub fn bit_reverse_qm31_pipeline(&self) -> &ComputePipelineState {
+        &self.bit_reverse_qm31_pipeline
+    }
+
+    /// Get GPU batch inverse pipeline for M31 elements.
+    pub fn batch_inverse_m31_pipeline(&self) -> &ComputePipelineState {
+        &self.batch_inverse_m31_pipeline
     }
 
     /// Get or create a flattened twiddle buffer from multiple layers.

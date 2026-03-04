@@ -1,4 +1,7 @@
 //! Metal proof-of-work grinding operations.
+//!
+//! Uses a candidate buffer approach: GPU threads write valid nonces into a shared
+//! buffer with an atomic counter, and the host picks the minimum.
 
 use bytemuck::cast_slice;
 use metal::MTLResourceOptions;
@@ -16,6 +19,9 @@ const BATCH_SIZE: u32 = 1024;
 
 // Number of GPU threads to launch per batch
 const THREADS_PER_BATCH: u64 = 16384;
+
+// Maximum candidates the kernel can collect per dispatch (must match shader's MAX_GRIND_CANDIDATES)
+const MAX_GRIND_CANDIDATES: usize = 64;
 
 impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> for MetalBackend {
     fn grind(channel: &Blake2sChannelGeneric<IS_M31_OUTPUT>, pow_bits: u32) -> u64 {
@@ -54,11 +60,17 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> f
         loop {
             let start_nonce = batch_id * THREADS_PER_BATCH * (BATCH_SIZE as u64);
 
-            // Create result buffer initialized to UINT64_MAX
-            let result_init = u64::MAX;
-            let result_buffer = device.new_buffer_with_data(
-                &result_init as *const u64 as *const _,
-                std::mem::size_of::<u64>() as u64,
+            // Create candidates buffer (MAX_GRIND_CANDIDATES × u64)
+            let candidates_buffer = device.new_buffer(
+                (MAX_GRIND_CANDIDATES * std::mem::size_of::<u64>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            // Create atomic candidate count, initialized to 0
+            let count_init: u32 = 0;
+            let count_buffer = device.new_buffer_with_data(
+                &count_init as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -67,24 +79,25 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> f
             let encoder = command_buffer.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(ctx.grind_pipeline());
             encoder.set_buffer(0, Some(&digest_buffer), 0);
-            encoder.set_buffer(1, Some(&result_buffer), 0);
+            encoder.set_buffer(1, Some(&candidates_buffer), 0);
+            encoder.set_buffer(2, Some(&count_buffer), 0);
             encoder.set_bytes(
-                2,
+                3,
                 std::mem::size_of::<u32>() as u64,
                 &pow_bits as *const u32 as *const _,
             );
             encoder.set_bytes(
-                3,
+                4,
                 std::mem::size_of::<u64>() as u64,
                 &start_nonce as *const u64 as *const _,
             );
             encoder.set_bytes(
-                4,
+                5,
                 std::mem::size_of::<u32>() as u64,
                 &BATCH_SIZE as *const u32 as *const _,
             );
             encoder.set_bytes(
-                5,
+                6,
                 std::mem::size_of::<bool>() as u64,
                 &IS_M31_OUTPUT as *const bool as *const _,
             );
@@ -109,11 +122,19 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<Blake2sChannelGeneric<IS_M31_OUTPUT>> f
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            // Check if we found a solution
-            let result = unsafe { *(result_buffer.contents() as *const u64) };
+            // Read candidate count and find minimum
+            let count =
+                unsafe { *(count_buffer.contents() as *const u32) } as usize;
 
-            if result != u64::MAX {
-                return result;
+            if count > 0 {
+                let n = count.min(MAX_GRIND_CANDIDATES);
+                let candidates = unsafe {
+                    std::slice::from_raw_parts(
+                        candidates_buffer.contents() as *const u64,
+                        n,
+                    )
+                };
+                return *candidates.iter().min().unwrap();
             }
 
             batch_id += 1;
@@ -164,11 +185,17 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPU
         loop {
             let start_nonce = batch_id * THREADS_PER_BATCH * (BATCH_SIZE as u64);
 
-            // Create result buffer initialized to UINT64_MAX
-            let result_init = u64::MAX;
-            let result_buffer = device.new_buffer_with_data(
-                &result_init as *const u64 as *const _,
-                std::mem::size_of::<u64>() as u64,
+            // Create candidates buffer (MAX_GRIND_CANDIDATES × u64)
+            let candidates_buffer = device.new_buffer(
+                (MAX_GRIND_CANDIDATES * std::mem::size_of::<u64>()) as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            // Create atomic candidate count, initialized to 0
+            let count_init: u32 = 0;
+            let count_buffer = device.new_buffer_with_data(
+                &count_init as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u64,
                 MTLResourceOptions::StorageModeShared,
             );
 
@@ -177,24 +204,25 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPU
             let encoder = command_buffer.new_compute_command_encoder();
             encoder.set_compute_pipeline_state(ctx.grind_pipeline());
             encoder.set_buffer(0, Some(&digest_buffer), 0);
-            encoder.set_buffer(1, Some(&result_buffer), 0);
+            encoder.set_buffer(1, Some(&candidates_buffer), 0);
+            encoder.set_buffer(2, Some(&count_buffer), 0);
             encoder.set_bytes(
-                2,
+                3,
                 std::mem::size_of::<u32>() as u64,
                 &pow_bits as *const u32 as *const _,
             );
             encoder.set_bytes(
-                3,
+                4,
                 std::mem::size_of::<u64>() as u64,
                 &start_nonce as *const u64 as *const _,
             );
             encoder.set_bytes(
-                4,
+                5,
                 std::mem::size_of::<u32>() as u64,
                 &BATCH_SIZE as *const u32 as *const _,
             );
             encoder.set_bytes(
-                5,
+                6,
                 std::mem::size_of::<bool>() as u64,
                 &IS_M31_OUTPUT as *const bool as *const _,
             );
@@ -219,11 +247,19 @@ impl<const IS_M31_OUTPUT: bool> GrindOps<MetalBlake2sChannelGeneric<IS_M31_OUTPU
             command_buffer.commit();
             command_buffer.wait_until_completed();
 
-            // Check if we found a solution
-            let result = unsafe { *(result_buffer.contents() as *const u64) };
+            // Read candidate count and find minimum
+            let count =
+                unsafe { *(count_buffer.contents() as *const u32) } as usize;
 
-            if result != u64::MAX {
-                return result;
+            if count > 0 {
+                let n = count.min(MAX_GRIND_CANDIDATES);
+                let candidates = unsafe {
+                    std::slice::from_raw_parts(
+                        candidates_buffer.contents() as *const u64,
+                        n,
+                    )
+                };
+                return *candidates.iter().min().unwrap();
             }
 
             batch_id += 1;

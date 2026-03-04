@@ -298,8 +298,12 @@ impl GkrOps for MetalBackend {
         h: &GkrMultivariatePolyOracle<'_, Self>,
         claim: SecureField,
     ) -> UnivariatePoly<SecureField> {
-        let simd_h: &GkrMultivariatePolyOracle<'_, SimdBackend> =
-            unsafe { &*(h as *const _ as *const _) };
-        SimdBackend::sum_as_poly_in_first_variable(simd_h, claim)
+        use crate::prover::backend::CpuBackend;
+
+        // Convert to CPU backend and compute there.
+        // The previous implementation used an unsafe transmute to SimdBackend which was UB
+        // since Metal and SIMD column types have different layouts.
+        let cpu_h = h.to_cpu();
+        CpuBackend::sum_as_poly_in_first_variable(&cpu_h, claim)
     }
 }

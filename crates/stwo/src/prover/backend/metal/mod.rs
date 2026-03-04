@@ -81,7 +81,7 @@ use crate::core::fields::qm31::SecureField;
 #[cfg(target_os = "macos")]
 use crate::core::vcs_lifted::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerkleChannel};
 #[cfg(target_os = "macos")]
-use crate::prover::backend::{Backend, BackendForChannel, ColumnOps};
+use crate::prover::backend::{Backend, BackendForChannel, Column, ColumnOps};
 
 /// Size thresholds for GPU vs CPU dispatch.
 ///
@@ -123,8 +123,12 @@ mod grind;
 mod merkle;
 #[cfg(target_os = "macos")]
 mod poly;
+#[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
+mod poseidon252;
 #[cfg(target_os = "macos")]
 mod quotients;
+#[cfg(target_os = "macos")]
+mod tests;
 
 /// Metal GPU-accelerated backend.
 ///
@@ -149,14 +153,47 @@ impl BackendForChannel<MetalBlake2sMerkleChannel> for MetalBackend {}
 #[cfg(target_os = "macos")]
 impl BackendForChannel<MetalBlake2sM31MerkleChannel> for MetalBackend {}
 
+#[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
+impl BackendForChannel<crate::core::vcs_lifted::poseidon252_merkle::Poseidon252MerkleChannel>
+    for MetalBackend
+{
+}
+
 #[cfg(target_os = "macos")]
 impl ColumnOps<BaseField> for MetalBackend {
     type Column = MetalBaseColumn;
 
     fn bit_reverse_column(column: &mut Self::Column) {
-        use crate::core::utils::bit_reverse;
-        let slice = column.as_mut_slice();
-        bit_reverse(slice);
+        let log_size = column.len().ilog2();
+
+        // GPU dispatch for large columns, CPU fallback for small
+        if log_size >= thresholds::MIN_FFT_LOG_SIZE {
+            let ctx = MetalContext::global();
+            let command_buffer = ctx.command_queue().new_command_buffer();
+            let encoder = command_buffer.new_compute_command_encoder();
+            encoder.set_compute_pipeline_state(ctx.bit_reverse_m31_pipeline());
+
+            encoder.set_buffer(0, Some(column.buffer()), 0);
+            encoder.set_bytes(
+                1,
+                std::mem::size_of::<u32>() as u64,
+                &log_size as *const u32 as *const _,
+            );
+
+            let n = column.len() as u64;
+            let threads_per_grid = metal::MTLSize::new(n, 1, 1);
+            let threads_per_threadgroup =
+                metal::MTLSize::new(256.min(n), 1, 1);
+            encoder.dispatch_threads(threads_per_grid, threads_per_threadgroup);
+
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+        } else {
+            use crate::core::utils::bit_reverse;
+            let slice = column.as_mut_slice();
+            bit_reverse(slice);
+        }
     }
 }
 
@@ -165,9 +202,36 @@ impl ColumnOps<SecureField> for MetalBackend {
     type Column = MetalSecureColumn;
 
     fn bit_reverse_column(column: &mut Self::Column) {
-        use crate::core::utils::bit_reverse;
-        let slice = column.as_mut_slice();
-        bit_reverse(slice);
+        let log_size = column.len().ilog2();
+
+        // GPU dispatch for large columns, CPU fallback for small
+        if log_size >= thresholds::MIN_FFT_LOG_SIZE {
+            let ctx = MetalContext::global();
+            let command_buffer = ctx.command_queue().new_command_buffer();
+            let encoder = command_buffer.new_compute_command_encoder();
+            encoder.set_compute_pipeline_state(ctx.bit_reverse_qm31_pipeline());
+
+            encoder.set_buffer(0, Some(column.buffer()), 0);
+            encoder.set_bytes(
+                1,
+                std::mem::size_of::<u32>() as u64,
+                &log_size as *const u32 as *const _,
+            );
+
+            let n = column.len() as u64;
+            let threads_per_grid = metal::MTLSize::new(n, 1, 1);
+            let threads_per_threadgroup =
+                metal::MTLSize::new(256.min(n), 1, 1);
+            encoder.dispatch_threads(threads_per_grid, threads_per_threadgroup);
+
+            encoder.end_encoding();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
+        } else {
+            use crate::core::utils::bit_reverse;
+            let slice = column.as_mut_slice();
+            bit_reverse(slice);
+        }
     }
 }
 

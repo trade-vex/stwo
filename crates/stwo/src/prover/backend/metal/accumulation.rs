@@ -45,12 +45,14 @@ impl AccumulationOps for MetalBackend {
             command_buffer.commit();
             command_buffer.wait_until_completed();
         } else {
-            // Small columns: use SIMD fallback
-            let simd_column: &mut SecureColumnByCoords<SimdBackend> =
-                unsafe { &mut *(column as *mut _ as *mut _) };
-            let simd_other: &SecureColumnByCoords<SimdBackend> =
-                unsafe { &*(other as *const _ as *const _) };
-            SimdBackend::accumulate(simd_column, simd_other)
+            // Small columns: CPU fallback (element-wise addition)
+            for coord_idx in 0..4 {
+                let dst = column.columns[coord_idx].as_mut_slice();
+                let src = other.columns[coord_idx].as_slice();
+                for i in 0..len {
+                    dst[i] = dst[i] + src[i];
+                }
+            }
         }
     }
 
@@ -61,16 +63,16 @@ impl AccumulationOps for MetalBackend {
     fn lift_and_accumulate(
         cols: Vec<SecureColumnByCoords<Self>>,
     ) -> Option<SecureColumnByCoords<Self>> {
+        use crate::prover::backend::simd::column::BaseColumn;
+
+        // Read directly from Metal shared memory (zero-copy on Apple Silicon)
         let simd_cols: Vec<SecureColumnByCoords<SimdBackend>> = cols
             .into_iter()
-            .map(|col| {
-                let cpu_col = col.to_cpu();
-                SecureColumnByCoords::<SimdBackend>::from_cpu(cpu_col)
+            .map(|col| SecureColumnByCoords::<SimdBackend> {
+                columns: col.columns.map(|c| BaseColumn::from_cpu(c.as_slice())),
             })
             .collect();
-        SimdBackend::lift_and_accumulate(simd_cols).map(|simd_result| {
-            let cpu_result = simd_result.to_cpu();
-            SecureColumnByCoords::<MetalBackend>::from_cpu(cpu_result)
-        })
+        SimdBackend::lift_and_accumulate(simd_cols)
+            .map(SecureColumnByCoords::<MetalBackend>::from_simd)
     }
 }

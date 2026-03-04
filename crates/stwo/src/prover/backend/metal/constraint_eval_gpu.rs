@@ -327,8 +327,10 @@ pub fn evaluate_constraints_gpu(
     GpuConstraintEvalResult { output }
 }
 
-#[allow(dead_code)]
-#[allow(unused_variables)]
+/// Evaluate multiple constraint programs on the same trace.
+///
+/// Each program runs independently on GPU with its own bytecode and random coefficients,
+/// sharing the same reshaped trace data (cached on first call).
 pub fn evaluate_constraints_batched_gpu(
     bytecode_programs: &[&[u8]],
     random_coeffs_per_program: &[&[SecureField]],
@@ -336,7 +338,26 @@ pub fn evaluate_constraints_batched_gpu(
     trace_domain: &CanonicCoset,
     eval_domain_log_size: u32,
 ) -> Vec<GpuConstraintEvalResult> {
-    panic!("Batched constraint evaluation not yet implemented");
+    assert_eq!(bytecode_programs.len(), random_coeffs_per_program.len());
+
+    // Pre-warm the trace reshape cache (shared across all programs)
+    let eval_domain_size = 1usize << eval_domain_log_size;
+    let _ = reshape_trace_columns_gpu(trace, eval_domain_size);
+
+    // Run each program independently, reusing the cached reshaped trace
+    bytecode_programs
+        .iter()
+        .zip(random_coeffs_per_program.iter())
+        .map(|(bytecode, coeffs)| {
+            evaluate_constraints_gpu(
+                bytecode,
+                trace,
+                coeffs,
+                trace_domain,
+                eval_domain_log_size,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
